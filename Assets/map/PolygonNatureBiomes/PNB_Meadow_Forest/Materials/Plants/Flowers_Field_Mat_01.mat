@@ -71,6 +71,10 @@ Material:
         m_Texture: {fileID: 2800000, guid: 4199a601545ad164badaad1fe1733439, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
+    - _LeafAmbientOcclusion:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
     - _LeafNormalMap:
         m_Texture: {fileID: 2800000, guid: 88749769ab5dc85469d032a5acc10e1a, type: 3}
         m_Scale: {x: 1, y: 1}
@@ -139,6 +143,10 @@ Material:
         m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
+    - _TrunkAmbientOcclusion:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
     - _TrunkEmissiveMask:
         m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
@@ -156,6 +164,7 @@ Material:
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     m_Floats:
+    - _AlphaCutoff: 0.5
     - _Big_Wave: 10
     - _Big_WindAmount: 1.22
     - _Big_Windspeed: 1.84
@@ -184,8 +193,8 @@ Material:
     - _JitterAmount: 0.552
     - _JitterFreq: 0.19
     - _LOD_FADE_CROSSFADE: 1
-    - _LOD_FADE_CROSSFADE_in: 1
-    - _LOD_FADE_CROSSFADE_out: 1
+    - _LOD_FADE_CROSSFADE_in: 0
+    - _LOD_FADE_CROSSFADE_out: 0
     - _LeafBigNoiseAmount: 0.184
     - _LeafBigNoiseScale: 1
     - _LeafFlatColourSwitch: 0
@@ -258,3 +267,4 @@ Material:
     - _TrunkEmissiveColour: {r: 0, g: 0, b: 0, a: 0}
     - _TrunkNoiseColour: {r: 0, g: 0, b: 0, a: 0}
     - _TrunkTint: {r: 0.07843138, g: 0.02015968, b: 0, a: 0}
+  m_BuildTextureStacks: []

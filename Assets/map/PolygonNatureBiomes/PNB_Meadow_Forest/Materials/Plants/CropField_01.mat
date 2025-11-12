@@ -10,7 +10,7 @@ Material:
   m_Name: CropField_01
   m_Shader: {fileID: 4800000, guid: 6697e1f185bc8b840a2f02567abf15b5, type: 3}
   m_ShaderKeywords: 
-  m_LightmapFlags: 0
+  m_LightmapFlags: 2
   m_EnableInstancingVariants: 0
   m_DoubleSidedGI: 0
   m_CustomRenderQueue: -1
@@ -168,6 +168,7 @@ Material:
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     m_Floats:
+    - _AlphaCutoff: 0.5
     - _Big_Wave: 10
     - _Big_WindAmount: 1.22
     - _Big_Windspeed: 1.84
@@ -198,8 +199,8 @@ Material:
     - _LOD_FADE_CROSSFADE: 1
     - _LOD_FADE_CROSSFADE1: 1
     - _LOD_FADE_CROSSFADE2: 1
-    - _LOD_FADE_CROSSFADE_in: 1
-    - _LOD_FADE_CROSSFADE_out: 1
+    - _LOD_FADE_CROSSFADE_in: 0
+    - _LOD_FADE_CROSSFADE_out: 0
     - _LeafBigNoiseAmount: 0.608
     - _LeafBigNoiseScale: 1
     - _LeafFlatColourSwitch: 0
@@ -272,3 +273,4 @@ Material:
     - _TrunkEmissiveColour: {r: 0, g: 0, b: 0, a: 0}
     - _TrunkNoiseColour: {r: 0.24477875, g: 0.3301887, b: 0, a: 0}
     - _TrunkTint: {r: 0.07843138, g: 0.02015968, b: 0, a: 0}
+  m_BuildTextureStacks: []
