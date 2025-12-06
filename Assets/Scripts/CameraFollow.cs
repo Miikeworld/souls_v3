@@ -7,7 +7,7 @@ public class CameraFollow : MonoBehaviour
 
     [Header("Positioning")]
     public Vector3 offset = new Vector3(0f, 2f, -4f);
-    public Vector3 lockOnOffset = new Vector3(1f, 1.5f, -3f); // Offset when locked on
+    public Vector3 lockOnOffset = new Vector3(1f, 1.5f, -3f);
 
     [Header("Rotation")]
     public float mouseSensitivity = 2f;
@@ -55,7 +55,6 @@ public class CameraFollow : MonoBehaviour
 
     void UpdateFreeCamera()
     {
-        // Get mouse input (no Time.deltaTime for mouse!)
         float mouseX = Input.GetAxis("Mouse X") * mouseSensitivity;
         float mouseY = Input.GetAxis("Mouse Y") * mouseSensitivity;
 
@@ -74,18 +73,14 @@ public class CameraFollow : MonoBehaviour
 
     void UpdateLockedCamera()
     {
-        // Calculate direction from player to locked target
         Vector3 directionToTarget = (lockOnTarget.position - target.position).normalized;
         
-        // Allow horizontal rotation around locked target
         float mouseX = Input.GetAxis("Mouse X") * mouseSensitivity * 0.5f;
         yaw += mouseX;
         
-        // Calculate desired rotation (look at target with some manual control)
         Quaternion targetRotation = Quaternion.LookRotation(directionToTarget);
         float targetYaw = targetRotation.eulerAngles.y;
         
-        // Blend between locked rotation and manual yaw
         float blendedYaw = Mathf.LerpAngle(yaw, targetYaw, lockOnRotationSpeed * Time.deltaTime);
         yaw = blendedYaw;
         
@@ -95,7 +90,6 @@ public class CameraFollow : MonoBehaviour
         float smoothFactor = 1f - Mathf.Pow(0.5f, positionSmoothSpeed * Time.deltaTime);
         transform.position = Vector3.Lerp(transform.position, desiredPosition, smoothFactor);
 
-        // Look at locked target
         transform.LookAt(lockOnTarget.position);
     }
 

@@ -4,7 +4,7 @@ public class LockOnSystem : MonoBehaviour
 {
     [Header("Settings")]
     public float lockOnRange = 20f;
-    public string enemyTag = "Enemy"; // Use tags instead of layers
+    public string enemyTag = "Enemy";
     
     [Header("References")]
     public Transform player;
@@ -15,11 +15,8 @@ public class LockOnSystem : MonoBehaviour
 
     void Update()
     {
-        // Middle mouse button = Fire2 in old input system
         if (Input.GetMouseButtonDown(2))
         {
-            Debug.Log("Middle mouse pressed!");
-            
             if (!isLockedOn)
             {
                 LockOnToClosestEnemy();
@@ -30,7 +27,6 @@ public class LockOnSystem : MonoBehaviour
             }
         }
         
-        // Auto-release if target too far or destroyed
         if (isLockedOn && currentTarget != null)
         {
             float distance = Vector3.Distance(player.position, currentTarget.position);
@@ -50,11 +46,7 @@ public class LockOnSystem : MonoBehaviour
     {
         GameObject[] enemies = GameObject.FindGameObjectsWithTag(enemyTag);
         
-        if (enemies.Length == 0)
-        {
-            Debug.Log("No enemies found!");
-            return;
-        }
+        if (enemies.Length == 0) return;
         
         Transform closestEnemy = null;
         float closestDistance = Mathf.Infinity;
@@ -72,7 +64,6 @@ public class LockOnSystem : MonoBehaviour
         
         if (closestEnemy != null)
         {
-            // Find lock-on point (child) or use enemy center
             Transform lockPoint = closestEnemy.Find("LockOnPoint");
             currentTarget = lockPoint != null ? lockPoint : closestEnemy;
             
@@ -80,10 +71,6 @@ public class LockOnSystem : MonoBehaviour
             cameraFollow.SetLockOnTarget(currentTarget);
             
             Debug.Log("Locked onto: " + closestEnemy.name);
-        }
-        else
-        {
-            Debug.Log("No enemies in range!");
         }
     }
 
