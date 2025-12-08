@@ -8,6 +8,7 @@ public class ResourceUI : MonoBehaviour
     
     [Header("Health Bar")]
     public Image healthBarFill;
+    public Image healthBarBackground; // NEW: For damage flash effect
     public Text healthText;
     
     [Header("Mana Bar")]
@@ -22,6 +23,16 @@ public class ResourceUI : MonoBehaviour
     public Color healthColor = Color.red;
     public Color manaColor = Color.blue;
     public Color staminaColor = Color.green;
+    public Color lowHealthColor = new Color(1f, 0.5f, 0f); // Orange when low
+    
+    [Header("Animation")]
+    public float fillSpeed = 5f; // Smooth fill animation speed
+    public bool useSmoothFill = true;
+    
+    // Target fill amounts
+    private float targetHealthFill = 1f;
+    private float targetManaFill = 1f;
+    private float targetStaminaFill = 1f;
     
     void Start()
     {
@@ -46,6 +57,27 @@ public class ResourceUI : MonoBehaviour
         if (staminaBarFill != null) staminaBarFill.color = staminaColor;
     }
     
+    void Update()
+    {
+        if (!useSmoothFill) return;
+        
+        // Smoothly animate fill amounts
+        if (healthBarFill != null)
+        {
+            healthBarFill.fillAmount = Mathf.Lerp(healthBarFill.fillAmount, targetHealthFill, fillSpeed * Time.deltaTime);
+        }
+        
+        if (manaBarFill != null)
+        {
+            manaBarFill.fillAmount = Mathf.Lerp(manaBarFill.fillAmount, targetManaFill, fillSpeed * Time.deltaTime);
+        }
+        
+        if (staminaBarFill != null)
+        {
+            staminaBarFill.fillAmount = Mathf.Lerp(staminaBarFill.fillAmount, targetStaminaFill, fillSpeed * Time.deltaTime);
+        }
+    }
+    
     void OnDestroy()
     {
         if (targetEntity != null)
@@ -60,9 +92,24 @@ public class ResourceUI : MonoBehaviour
     {
         if (targetEntity == null) return;
         
+        targetHealthFill = targetEntity.GetHealthPercent();
+        
+        if (!useSmoothFill && healthBarFill != null)
+        {
+            healthBarFill.fillAmount = targetHealthFill;
+        }
+        
+        // Change color when low health (below 30%)
         if (healthBarFill != null)
         {
-            healthBarFill.fillAmount = targetEntity.GetHealthPercent();
+            if (targetHealthFill < 0.3f)
+            {
+                healthBarFill.color = lowHealthColor;
+            }
+            else
+            {
+                healthBarFill.color = healthColor;
+            }
         }
         
         if (healthText != null)
@@ -75,9 +122,11 @@ public class ResourceUI : MonoBehaviour
     {
         if (targetEntity == null) return;
         
-        if (manaBarFill != null)
+        targetManaFill = targetEntity.GetManaPercent();
+        
+        if (!useSmoothFill && manaBarFill != null)
         {
-            manaBarFill.fillAmount = targetEntity.GetManaPercent();
+            manaBarFill.fillAmount = targetManaFill;
         }
         
         if (manaText != null)
@@ -90,9 +139,11 @@ public class ResourceUI : MonoBehaviour
     {
         if (targetEntity == null) return;
         
-        if (staminaBarFill != null)
+        targetStaminaFill = targetEntity.GetStaminaPercent();
+        
+        if (!useSmoothFill && staminaBarFill != null)
         {
-            staminaBarFill.fillAmount = targetEntity.GetStaminaPercent();
+            staminaBarFill.fillAmount = targetStaminaFill;
         }
         
         if (staminaText != null)
