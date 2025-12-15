@@ -1,7 +1,7 @@
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.SceneManagement;
-using TMPro; // Add this for TextMeshPro
+using TMPro;
 using PsychoticLab;
 using System.Collections.Generic;
 
@@ -10,90 +10,23 @@ public class CharacterCreationController : MonoBehaviour
     [Header("References")]
     public CharacterRandomizer characterRandomizer;
     
-    [Header("UI Buttons")]
+    [Header("Main Buttons")]
     public Button randomizeButton;
     public Button confirmButton;
     public Button genderButton;
     public Button raceButton;
     
-    // Head
-    public Button nextHeadButton;
-    public Button prevHeadButton;
+    [Header("Body Part Buttons")]
+    public BodyPartButtons[] bodyPartButtons;
     
-    // Hair
-    public Button nextHairButton;
-    public Button prevHairButton;
-    
-    // Facial Hair (male only)
-    public Button nextFacialHairButton;
-    public Button prevFacialHairButton;
-    
-    // Torso
-    public Button nextTorsoButton;
-    public Button prevTorsoButton;
-    
-    // Arms Upper
-    public Button nextArmUpperButton;
-    public Button prevArmUpperButton;
-    
-    // Arms Lower
-    public Button nextArmLowerButton;
-    public Button prevArmLowerButton;
-    
-    // Hands
-    public Button nextHandButton;
-    public Button prevHandButton;
-    
-    // Hips
-    public Button nextHipsButton;
-    public Button prevHipsButton;
-    
-    // Legs
-    public Button nextLegsButton;
-    public Button prevLegsButton;
-    
-    // Chest Attachment (armor)
-    public Button nextChestArmorButton;
-    public Button prevChestArmorButton;
-    
-    // Back Attachment
-    public Button nextBackButton;
-    public Button prevBackButton;
-    
-    // Shoulder Attachments
-    public Button nextShoulderButton;
-    public Button prevShoulderButton;
-    
-    // Elbow Attachments
-    public Button nextElbowButton;
-    public Button prevElbowButton;
-    
-    // Hip Attachment
-    public Button nextHipArmorButton;
-    public Button prevHipArmorButton;
-    
-    // Knee Attachments
-    public Button nextKneeButton;
-    public Button prevKneeButton;
+    [Header("Color Buttons")]
+    public ColorButtons[] colorButtons;
     
     [Header("TextMeshPro Labels")]
     public TMP_Text genderText;
     public TMP_Text raceText;
-    public TMP_Text headText;
-    public TMP_Text hairText;
-    public TMP_Text facialHairText;
-    public TMP_Text torsoText;
-    public TMP_Text armUpperText;
-    public TMP_Text armLowerText;
-    public TMP_Text handText;
-    public TMP_Text hipsText;
-    public TMP_Text legsText;
-    public TMP_Text chestArmorText;
-    public TMP_Text backText;
-    public TMP_Text shoulderText;
-    public TMP_Text elbowText;
-    public TMP_Text hipArmorText;
-    public TMP_Text kneeText;
+    public BodyPartText[] bodyPartTexts;
+    public ColorText[] colorTexts;
     
     [Header("Settings")]
     public string gameSceneName = "GameScene";
@@ -101,83 +34,90 @@ public class CharacterCreationController : MonoBehaviour
     // Current selections
     private Gender currentGender = Gender.Male;
     private Race currentRace = Race.Human;
-    private int currentHeadIndex = 0;
-    private int currentHairIndex = 1;
-    private int currentFacialHairIndex = 0;
-    private int currentTorsoIndex = 1;
-    private int currentArmUpperIndex = 0;
-    private int currentArmLowerIndex = 0;
-    private int currentHandIndex = 0;
-    private int currentHipsIndex = 1;
-    private int currentLegsIndex = 0;
-    private int currentChestArmorIndex = 0;
-    private int currentBackIndex = 0;
-    private int currentShoulderIndex = 0;
-    private int currentElbowIndex = 0;
-    private int currentHipArmorIndex = 0;
-    private int currentKneeIndex = 0;
+    private SkinColor currentSkinColor = SkinColor.White;
+    
+    // Store all indices in a dictionary
+    private Dictionary<string, int> partIndices = new Dictionary<string, int>();
+    private Dictionary<string, int> colorIndices = new Dictionary<string, int>();
     
     void Start()
     {
-        // Disable auto-randomize
         if (characterRandomizer != null)
         {
             characterRandomizer.repeatOnPlay = false;
         }
         
-        // Setup button listeners
+        InitializeIndices();
+        SetupButtons();
+        UpdateCharacter();
+        UpdateUI();
+    }
+    
+    void InitializeIndices()
+    {
+        // Initialize all body part indices
+        partIndices["Head"] = 0;
+        partIndices["Hair"] = 1;
+        partIndices["FacialHair"] = 0;
+        partIndices["Torso"] = 1;
+        partIndices["ArmUpper"] = 0;
+        partIndices["ArmLower"] = 0;
+        partIndices["Hand"] = 0;
+        partIndices["Hips"] = 1;
+        partIndices["Legs"] = 0;
+        partIndices["Helmet"] = 0;
+        partIndices["HipAttachment"] = 0;
+        partIndices["Back"] = 0;
+        partIndices["Shoulder"] = 0;
+        partIndices["Elbow"] = 0;
+        partIndices["Knee"] = 0;
+        
+        // Initialize color indices
+        colorIndices["HairColor"] = 0;
+        colorIndices["PrimaryColor"] = 0;
+        colorIndices["SecondaryColor"] = 0;
+        colorIndices["MetalColor"] = 0;
+    }
+    
+    void SetupButtons()
+    {
+        // Main buttons
         if (randomizeButton) randomizeButton.onClick.AddListener(RandomizeCharacter);
         if (confirmButton) confirmButton.onClick.AddListener(ConfirmCharacter);
         if (genderButton) genderButton.onClick.AddListener(ToggleGender);
         if (raceButton) raceButton.onClick.AddListener(ToggleRace);
         
-        if (nextHeadButton) nextHeadButton.onClick.AddListener(NextHead);
-        if (prevHeadButton) prevHeadButton.onClick.AddListener(PreviousHead);
+        // Body part buttons (loop through array)
+        foreach (BodyPartButtons bpb in bodyPartButtons)
+        {
+            if (bpb.nextButton != null)
+            {
+                string partName = bpb.partName;
+                bpb.nextButton.onClick.AddListener(() => ChangePart(partName, 1));
+            }
+            
+            if (bpb.prevButton != null)
+            {
+                string partName = bpb.partName;
+                bpb.prevButton.onClick.AddListener(() => ChangePart(partName, -1));
+            }
+        }
         
-        if (nextHairButton) nextHairButton.onClick.AddListener(NextHair);
-        if (prevHairButton) prevHairButton.onClick.AddListener(PreviousHair);
-        
-        if (nextFacialHairButton) nextFacialHairButton.onClick.AddListener(NextFacialHair);
-        if (prevFacialHairButton) prevFacialHairButton.onClick.AddListener(PreviousFacialHair);
-        
-        if (nextTorsoButton) nextTorsoButton.onClick.AddListener(NextTorso);
-        if (prevTorsoButton) prevTorsoButton.onClick.AddListener(PreviousTorso);
-        
-        if (nextArmUpperButton) nextArmUpperButton.onClick.AddListener(NextArmUpper);
-        if (prevArmUpperButton) prevArmUpperButton.onClick.AddListener(PreviousArmUpper);
-        
-        if (nextArmLowerButton) nextArmLowerButton.onClick.AddListener(NextArmLower);
-        if (prevArmLowerButton) prevArmLowerButton.onClick.AddListener(PreviousArmLower);
-        
-        if (nextHandButton) nextHandButton.onClick.AddListener(NextHand);
-        if (prevHandButton) prevHandButton.onClick.AddListener(PreviousHand);
-        
-        if (nextHipsButton) nextHipsButton.onClick.AddListener(NextHips);
-        if (prevHipsButton) prevHipsButton.onClick.AddListener(PreviousHips);
-        
-        if (nextLegsButton) nextLegsButton.onClick.AddListener(NextLegs);
-        if (prevLegsButton) prevLegsButton.onClick.AddListener(PreviousLegs);
-        
-        if (nextChestArmorButton) nextChestArmorButton.onClick.AddListener(NextChestArmor);
-        if (prevChestArmorButton) prevChestArmorButton.onClick.AddListener(PreviousChestArmor);
-        
-        if (nextBackButton) nextBackButton.onClick.AddListener(NextBack);
-        if (prevBackButton) prevBackButton.onClick.AddListener(PreviousBack);
-        
-        if (nextShoulderButton) nextShoulderButton.onClick.AddListener(NextShoulder);
-        if (prevShoulderButton) prevShoulderButton.onClick.AddListener(PreviousShoulder);
-        
-        if (nextElbowButton) nextElbowButton.onClick.AddListener(NextElbow);
-        if (prevElbowButton) prevElbowButton.onClick.AddListener(PreviousElbow);
-        
-        if (nextHipArmorButton) nextHipArmorButton.onClick.AddListener(NextHipArmor);
-        if (prevHipArmorButton) prevHipArmorButton.onClick.AddListener(PreviousHipArmor);
-        
-        if (nextKneeButton) nextKneeButton.onClick.AddListener(NextKnee);
-        if (prevKneeButton) prevKneeButton.onClick.AddListener(PreviousKnee);
-        
-        UpdateCharacter();
-        UpdateUI();
+        // Color buttons (loop through array)
+        foreach (ColorButtons cb in colorButtons)
+        {
+            if (cb.nextButton != null)
+            {
+                string colorName = cb.colorName;
+                cb.nextButton.onClick.AddListener(() => ChangeColor(colorName, 1));
+            }
+            
+            if (cb.prevButton != null)
+            {
+                string colorName = cb.colorName;
+                cb.prevButton.onClick.AddListener(() => ChangeColor(colorName, -1));
+            }
+        }
     }
     
     void Update()
@@ -197,16 +137,53 @@ public class CharacterCreationController : MonoBehaviour
     {
         if (characterRandomizer != null)
         {
-            characterRandomizer.SendMessage("Randomize");
+            // Use our own randomization to ensure indices are saved
+            RandomizeAllParts();
+            UpdateCharacter();
+            UpdateUI();
+            
+            Debug.Log("Character randomized and ready to save!");
         }
+    }
+    
+    void RandomizeAllParts()
+    {
+        // Randomize gender and race
+        currentGender = (Gender)Random.Range(0, 2);
+        currentRace = (Race)Random.Range(0, 2);
+        currentSkinColor = (currentRace == Race.Elf) ? SkinColor.Elf : (SkinColor)Random.Range(0, 3);
+        
+        // Randomize all parts EXCEPT Helmet (we'll do that separately)
+        foreach (var key in new List<string>(partIndices.Keys))
+        {
+            if (key == "Helmet") continue; // Skip helmet for now
+            
+            int maxCount = GetPartMaxCount(key);
+            int minValue = (key == "Torso" || key == "Hips") ? 1 : 0;
+            
+            if (maxCount > 0)
+            {
+                partIndices[key] = Random.Range(minValue, maxCount);
+            }
+        }
+        
+        // Randomize helmet separately (including 0 for no helmet)
+        int helmetMax = GetPartMaxCount("Helmet");
+        partIndices["Helmet"] = Random.Range(0, helmetMax); // 0 = no helmet
+        
+        // Randomize colors
+        colorIndices["HairColor"] = Random.Range(0, GetHairColorArray().Length);
+        colorIndices["PrimaryColor"] = Random.Range(0, characterRandomizer.primary.Length);
+        colorIndices["SecondaryColor"] = Random.Range(0, characterRandomizer.secondary.Length);
+        colorIndices["MetalColor"] = Random.Range(0, characterRandomizer.metalPrimary.Length);
     }
     
     void ToggleGender()
     {
         currentGender = (currentGender == Gender.Male) ? Gender.Female : Gender.Male;
-        currentHeadIndex = 0;
-        currentFacialHairIndex = 0;
-        currentTorsoIndex = 1;
+        partIndices["Head"] = 0;
+        partIndices["FacialHair"] = 0;
+        partIndices["Torso"] = 1;
         UpdateCharacter();
         UpdateUI();
     }
@@ -214,57 +191,205 @@ public class CharacterCreationController : MonoBehaviour
     void ToggleRace()
     {
         currentRace = (currentRace == Race.Human) ? Race.Elf : Race.Human;
+        currentSkinColor = (currentRace == Race.Elf) ? SkinColor.Elf : SkinColor.White;
+        
+        // Reset hair color when race changes
+        colorIndices["HairColor"] = 0;
+        
         UpdateCharacter();
+        UpdateColors();
         UpdateUI();
     }
     
-    void NextHead() { currentHeadIndex++; UpdateCharacter(); UpdateUI(); }
-    void PreviousHead() { currentHeadIndex--; if (currentHeadIndex < 0) currentHeadIndex = 0; UpdateCharacter(); UpdateUI(); }
+    // Universal part changer
+    void ChangePart(string partName, int direction)
+    {
+        int maxCount = GetPartMaxCount(partName);
+        int minValue = (partName == "Torso" || partName == "Hips") ? 1 : 0;
+        
+        int newValue = partIndices[partName] + direction;
+        
+        // Check limits - stop at boundaries
+        if (newValue >= minValue && newValue < maxCount)
+        {
+            partIndices[partName] = newValue;
+            UpdateCharacter();
+            UpdateUI();
+        }
+    }
     
-    void NextHair() { currentHairIndex++; UpdateCharacter(); UpdateUI(); }
-    void PreviousHair() { currentHairIndex--; if (currentHairIndex < 0) currentHairIndex = 0; UpdateCharacter(); UpdateUI(); }
+    // Universal color changer
+    void ChangeColor(string colorName, int direction)
+    {
+        if (colorName == "SkinColor")
+        {
+            if (currentRace == Race.Elf) return; // Can't change elf skin
+            
+            int skinIndex = (int)currentSkinColor;
+            int newSkinValue = skinIndex + direction;
+            
+            if (newSkinValue >= 0 && newSkinValue <= 2) // White, Brown, Black
+            {
+                currentSkinColor = (SkinColor)newSkinValue;
+                
+                // RESET HAIR COLOR INDEX when skin changes (different array lengths!)
+                Color[] newHairColors = GetHairColorArray();
+                
+                // If current hair index is too high for new skin, reset to 0
+                if (colorIndices["HairColor"] >= newHairColors.Length)
+                {
+                    colorIndices["HairColor"] = 0;
+                }
+                
+                UpdateColors();
+                UpdateUI();
+            }
+            return;
+        }
+        
+        // Special handling for HairColor to respect current skin's array length
+        if (colorName == "HairColor")
+        {
+            Color[] hairColors = GetHairColorArray();
+            int currentIndex = colorIndices["HairColor"];
+            int newHairValue = currentIndex + direction;
+            
+            // Check limits for current skin's hair color array
+            if (newHairValue >= 0 && newHairValue < hairColors.Length)
+            {
+                colorIndices["HairColor"] = newHairValue;
+                UpdateColors();
+                UpdateUI();
+            }
+            return;
+        }
+        
+        // Regular color handling for Primary, Secondary, Metal
+        int maxCount = GetColorMaxCount(colorName);
+        int newValue = colorIndices[colorName] + direction;
+        
+        // Check limits - stop at boundaries
+        if (newValue >= 0 && newValue < maxCount)
+        {
+            colorIndices[colorName] = newValue;
+            UpdateColors();
+            UpdateUI();
+        }
+    }
     
-    void NextFacialHair() { currentFacialHairIndex++; UpdateCharacter(); UpdateUI(); }
-    void PreviousFacialHair() { currentFacialHairIndex--; if (currentFacialHairIndex < 0) currentFacialHairIndex = 0; UpdateCharacter(); UpdateUI(); }
+    int GetPartMaxCount(string partName)
+    {
+        CharacterObjectGroups parts = GetCurrentParts();
+        
+        switch (partName)
+        {
+            case "Head": return parts.headAllElements.Count;
+            case "Hair": return characterRandomizer.allGender.all_Hair.Count;
+            case "FacialHair": return parts.facialHair.Count;
+            case "Torso": return parts.torso.Count;
+            case "ArmUpper": return parts.arm_Upper_Right.Count;
+            case "ArmLower": return parts.arm_Lower_Right.Count;
+            case "Hand": return parts.hand_Right.Count;
+            case "Hips": return parts.hips.Count;
+            case "Legs": return parts.leg_Right.Count;
+            case "Helmet": 
+                // Combined count: 0=none + all helmet types
+                return 1 + characterRandomizer.allGender.headCoverings_Base_Hair.Count + 
+                       characterRandomizer.allGender.headCoverings_No_Hair.Count +
+                       characterRandomizer.allGender.headCoverings_No_FacialHair.Count;
+            case "HipAttachment": return characterRandomizer.allGender.hips_Attachment.Count;
+            case "Back": return characterRandomizer.allGender.back_Attachment.Count;
+            case "Shoulder": return characterRandomizer.allGender.shoulder_Attachment_Right.Count;
+            case "Elbow": return characterRandomizer.allGender.elbow_Attachment_Right.Count;
+            case "Knee": return characterRandomizer.allGender.knee_Attachement_Right.Count;
+            default: return 0;
+        }
+    }
     
-    void NextTorso() { currentTorsoIndex++; UpdateCharacter(); UpdateUI(); }
-    void PreviousTorso() { currentTorsoIndex--; if (currentTorsoIndex < 1) currentTorsoIndex = 1; UpdateCharacter(); UpdateUI(); }
+    int GetColorMaxCount(string colorName)
+    {
+        switch (colorName)
+        {
+            case "HairColor": return GetHairColorArray().Length;
+            case "PrimaryColor": return characterRandomizer.primary.Length;
+            case "SecondaryColor": return characterRandomizer.secondary.Length;
+            case "MetalColor": return characterRandomizer.metalPrimary.Length;
+            default: return 0;
+        }
+    }
     
-    void NextArmUpper() { currentArmUpperIndex++; UpdateCharacter(); UpdateUI(); }
-    void PreviousArmUpper() { currentArmUpperIndex--; if (currentArmUpperIndex < 0) currentArmUpperIndex = 0; UpdateCharacter(); UpdateUI(); }
+    CharacterObjectGroups GetCurrentParts()
+    {
+        return (currentGender == Gender.Male) ? characterRandomizer.male : characterRandomizer.female;
+    }
     
-    void NextArmLower() { currentArmLowerIndex++; UpdateCharacter(); UpdateUI(); }
-    void PreviousArmLower() { currentArmLowerIndex--; if (currentArmLowerIndex < 0) currentArmLowerIndex = 0; UpdateCharacter(); UpdateUI(); }
+    Color[] GetHairColorArray()
+    {
+        switch (currentSkinColor)
+        {
+            case SkinColor.White: return characterRandomizer.whiteHair;
+            case SkinColor.Brown: return characterRandomizer.brownHair;
+            case SkinColor.Black: return characterRandomizer.blackHair;
+            case SkinColor.Elf: return characterRandomizer.elfHair;
+            default: return characterRandomizer.whiteHair;
+        }
+    }
     
-    void NextHand() { currentHandIndex++; UpdateCharacter(); UpdateUI(); }
-    void PreviousHand() { currentHandIndex--; if (currentHandIndex < 0) currentHandIndex = 0; UpdateCharacter(); UpdateUI(); }
+    Color[] GetSkinColorArray()
+    {
+        switch (currentSkinColor)
+        {
+            case SkinColor.White: return characterRandomizer.whiteSkin;
+            case SkinColor.Brown: return characterRandomizer.brownSkin;
+            case SkinColor.Black: return characterRandomizer.blackSkin;
+            case SkinColor.Elf: return characterRandomizer.elfSkin;
+            default: return characterRandomizer.whiteSkin;
+        }
+    }
     
-    void NextHips() { currentHipsIndex++; UpdateCharacter(); UpdateUI(); }
-    void PreviousHips() { currentHipsIndex--; if (currentHipsIndex < 1) currentHipsIndex = 1; UpdateCharacter(); UpdateUI(); }
-    
-    void NextLegs() { currentLegsIndex++; UpdateCharacter(); UpdateUI(); }
-    void PreviousLegs() { currentLegsIndex--; if (currentLegsIndex < 0) currentLegsIndex = 0; UpdateCharacter(); UpdateUI(); }
-    
-    void NextChestArmor() { currentChestArmorIndex++; UpdateCharacter(); UpdateUI(); }
-    void PreviousChestArmor() { currentChestArmorIndex--; if (currentChestArmorIndex < 0) currentChestArmorIndex = 0; UpdateCharacter(); UpdateUI(); }
-    
-    void NextBack() { currentBackIndex++; UpdateCharacter(); UpdateUI(); }
-    void PreviousBack() { currentBackIndex--; if (currentBackIndex < 0) currentBackIndex = 0; UpdateCharacter(); UpdateUI(); }
-    
-    void NextShoulder() { currentShoulderIndex++; UpdateCharacter(); UpdateUI(); }
-    void PreviousShoulder() { currentShoulderIndex--; if (currentShoulderIndex < 0) currentShoulderIndex = 0; UpdateCharacter(); UpdateUI(); }
-    
-    void NextElbow() { currentElbowIndex++; UpdateCharacter(); UpdateUI(); }
-    void PreviousElbow() { currentElbowIndex--; if (currentElbowIndex < 0) currentElbowIndex = 0; UpdateCharacter(); UpdateUI(); }
-    
-    void NextHipArmor() { currentHipArmorIndex++; UpdateCharacter(); UpdateUI(); }
-    void PreviousHipArmor() { currentHipArmorIndex--; if (currentHipArmorIndex < 0) currentHipArmorIndex = 0; UpdateCharacter(); UpdateUI(); }
-    
-    void NextKnee() { currentKneeIndex++; UpdateCharacter(); UpdateUI(); }
-    void PreviousKnee() { currentKneeIndex--; if (currentKneeIndex < 0) currentKneeIndex = 0; UpdateCharacter(); UpdateUI(); }
+    void UpdateColors()
+    {
+        if (characterRandomizer.mat == null) return;
+        
+        // Skin
+        Color[] skinColors = GetSkinColorArray();
+        if (skinColors.Length > 0)
+            characterRandomizer.mat.SetColor("_Color_Skin", skinColors[0]);
+        
+        // Hair - PROPERLY CLAMPED for current skin
+        Color[] hairColors = GetHairColorArray();
+        if (hairColors.Length > 0)
+        {
+            int clampedIndex = Mathf.Clamp(colorIndices["HairColor"], 0, hairColors.Length - 1);
+            colorIndices["HairColor"] = clampedIndex;
+            characterRandomizer.mat.SetColor("_Color_Hair", hairColors[clampedIndex]);
+        }
+        
+        // Primary
+        if (characterRandomizer.primary.Length > 0)
+        {
+            int index = Mathf.Clamp(colorIndices["PrimaryColor"], 0, characterRandomizer.primary.Length - 1);
+            characterRandomizer.mat.SetColor("_Color_Primary", characterRandomizer.primary[index]);
+        }
+        
+        // Secondary
+        if (characterRandomizer.secondary.Length > 0)
+        {
+            int index = Mathf.Clamp(colorIndices["SecondaryColor"], 0, characterRandomizer.secondary.Length - 1);
+            characterRandomizer.mat.SetColor("_Color_Secondary", characterRandomizer.secondary[index]);
+        }
+        
+        // Metal
+        if (characterRandomizer.metalPrimary.Length > 0)
+        {
+            int index = Mathf.Clamp(colorIndices["MetalColor"], 0, characterRandomizer.metalPrimary.Length - 1);
+            characterRandomizer.mat.SetColor("_Color_Metal_Primary", characterRandomizer.metalPrimary[index]);
+        }
+    }
     
     void UpdateCharacter()
     {
+        // Clear existing
         if (characterRandomizer.enabledObjects.Count > 0)
         {
             foreach (GameObject obj in characterRandomizer.enabledObjects)
@@ -274,139 +399,106 @@ public class CharacterCreationController : MonoBehaviour
             characterRandomizer.enabledObjects.Clear();
         }
         
-        CharacterObjectGroups parts = (currentGender == Gender.Male) ? 
-            characterRandomizer.male : characterRandomizer.female;
+        CharacterObjectGroups parts = GetCurrentParts();
         
-        // HEAD
-        if (parts.headAllElements.Count > 0)
+        // Determine helmet type and what to hide
+        int helmetIndex = partIndices["Helmet"];
+        bool hideHair = false;
+        bool hideFacialHair = false;
+        
+        // Activate parts using dictionary
+        ActivatePartByName("Head", parts.headAllElements);
+        ActivatePartByName("Eyebrows", parts.eyebrow, 0);
+        
+        // Process helmet (combined system) - ONLY IF INDEX > 0
+        if (helmetIndex > 0)
         {
-            int index = Mathf.Clamp(currentHeadIndex, 0, parts.headAllElements.Count - 1);
-            ActivatePart(parts.headAllElements[index]);
+            int hairHelmets = characterRandomizer.allGender.headCoverings_Base_Hair.Count;
+            int fullHelmets = characterRandomizer.allGender.headCoverings_No_Hair.Count;
+            int facialHairHelmets = characterRandomizer.allGender.headCoverings_No_FacialHair.Count;
+            
+            if (helmetIndex <= hairHelmets)
+            {
+                // Type 1: Helmets that show hair (hats, hoods, bandanas)
+                int index = helmetIndex - 1;
+                if (index >= 0 && index < hairHelmets)
+                {
+                    ActivatePart(characterRandomizer.allGender.headCoverings_Base_Hair[index]);
+                }
+                hideHair = false;
+                hideFacialHair = false;
+            }
+            else if (helmetIndex <= hairHelmets + fullHelmets)
+            {
+                // Type 2: Full face helmets (hide hair)
+                int index = helmetIndex - hairHelmets - 1;
+                if (index >= 0 && index < fullHelmets)
+                {
+                    ActivatePart(characterRandomizer.allGender.headCoverings_No_Hair[index]);
+                }
+                hideHair = true;
+                hideFacialHair = true;
+            }
+            else
+            {
+                // Type 3: Helmets that hide facial hair only
+                int index = helmetIndex - hairHelmets - fullHelmets - 1;
+                if (index >= 0 && index < facialHairHelmets)
+                {
+                    ActivatePart(characterRandomizer.allGender.headCoverings_No_FacialHair[index]);
+                }
+                hideHair = false;
+                hideFacialHair = true;
+            }
         }
+        // If helmetIndex == 0, no helmet is activated at all
         
-        // EYEBROWS
-        if (parts.eyebrow.Count > 0)
-        {
-            ActivatePart(parts.eyebrow[0]);
-        }
+        // Only show facial hair if male and not hidden by helmet
+        if (currentGender == Gender.Male && !hideFacialHair)
+            ActivatePartByName("FacialHair", parts.facialHair);
         
-        // FACIAL HAIR
-        if (currentGender == Gender.Male && parts.facialHair.Count > 0)
-        {
-            int index = Mathf.Clamp(currentFacialHairIndex, 0, parts.facialHair.Count - 1);
-            ActivatePart(parts.facialHair[index]);
-        }
+        ActivatePartByName("Torso", parts.torso);
+        ActivatePartByName("ArmUpper", parts.arm_Upper_Right);
+        ActivatePartByName("ArmUpper", parts.arm_Upper_Left);
+        ActivatePartByName("ArmLower", parts.arm_Lower_Right);
+        ActivatePartByName("ArmLower", parts.arm_Lower_Left);
+        ActivatePartByName("Hand", parts.hand_Right);
+        ActivatePartByName("Hand", parts.hand_Left);
+        ActivatePartByName("Hips", parts.hips);
+        ActivatePartByName("Legs", parts.leg_Right);
+        ActivatePartByName("Legs", parts.leg_Left);
         
-        // TORSO
-        if (parts.torso.Count > 0)
-        {
-            int index = Mathf.Clamp(currentTorsoIndex, 0, parts.torso.Count - 1);
-            ActivatePart(parts.torso[index]);
-        }
+        // All gender parts
+        // Only show hair if not hidden by helmet
+        if (!hideHair)
+            ActivatePartByName("Hair", characterRandomizer.allGender.all_Hair);
         
-        // ARMS UPPER
-        if (parts.arm_Upper_Right.Count > 0)
-        {
-            int index = Mathf.Clamp(currentArmUpperIndex, 0, parts.arm_Upper_Right.Count - 1);
-            ActivatePart(parts.arm_Upper_Right[index]);
-            if (parts.arm_Upper_Left.Count > index)
-                ActivatePart(parts.arm_Upper_Left[index]);
-        }
+        ActivatePartByName("HipAttachment", characterRandomizer.allGender.hips_Attachment);
+        ActivatePartByName("Back", characterRandomizer.allGender.back_Attachment);
+        ActivatePartByName("Shoulder", characterRandomizer.allGender.shoulder_Attachment_Right);
+        ActivatePartByName("Shoulder", characterRandomizer.allGender.shoulder_Attachment_Left);
+        ActivatePartByName("Elbow", characterRandomizer.allGender.elbow_Attachment_Right);
+        ActivatePartByName("Elbow", characterRandomizer.allGender.elbow_Attachment_Left);
+        ActivatePartByName("Knee", characterRandomizer.allGender.knee_Attachement_Right);
+        ActivatePartByName("Knee", characterRandomizer.allGender.knee_Attachement_Left);
         
-        // ARMS LOWER
-        if (parts.arm_Lower_Right.Count > 0)
-        {
-            int index = Mathf.Clamp(currentArmLowerIndex, 0, parts.arm_Lower_Right.Count - 1);
-            ActivatePart(parts.arm_Lower_Right[index]);
-            if (parts.arm_Lower_Left.Count > index)
-                ActivatePart(parts.arm_Lower_Left[index]);
-        }
-        
-        // HANDS
-        if (parts.hand_Right.Count > 0)
-        {
-            int index = Mathf.Clamp(currentHandIndex, 0, parts.hand_Right.Count - 1);
-            ActivatePart(parts.hand_Right[index]);
-            if (parts.hand_Left.Count > index)
-                ActivatePart(parts.hand_Left[index]);
-        }
-        
-        // HIPS
-        if (parts.hips.Count > 0)
-        {
-            int index = Mathf.Clamp(currentHipsIndex, 0, parts.hips.Count - 1);
-            ActivatePart(parts.hips[index]);
-        }
-        
-        // LEGS
-        if (parts.leg_Right.Count > 0)
-        {
-            int index = Mathf.Clamp(currentLegsIndex, 0, parts.leg_Right.Count - 1);
-            ActivatePart(parts.leg_Right[index]);
-            if (parts.leg_Left.Count > index)
-                ActivatePart(parts.leg_Left[index]);
-        }
-        
-        // HAIR
-        if (characterRandomizer.allGender.all_Hair.Count > 0)
-        {
-            int index = Mathf.Clamp(currentHairIndex, 0, characterRandomizer.allGender.all_Hair.Count - 1);
-            ActivatePart(characterRandomizer.allGender.all_Hair[index]);
-        }
-        
-        // CHEST ARMOR
-        if (characterRandomizer.allGender.chest_Attachment.Count > 0)
-        {
-            int index = Mathf.Clamp(currentChestArmorIndex, 0, characterRandomizer.allGender.chest_Attachment.Count - 1);
-            ActivatePart(characterRandomizer.allGender.chest_Attachment[index]);
-        }
-        
-        // BACK
-        if (characterRandomizer.allGender.back_Attachment.Count > 0)
-        {
-            int index = Mathf.Clamp(currentBackIndex, 0, characterRandomizer.allGender.back_Attachment.Count - 1);
-            ActivatePart(characterRandomizer.allGender.back_Attachment[index]);
-        }
-        
-        // SHOULDERS
-        if (characterRandomizer.allGender.shoulder_Attachment_Right.Count > 0)
-        {
-            int index = Mathf.Clamp(currentShoulderIndex, 0, characterRandomizer.allGender.shoulder_Attachment_Right.Count - 1);
-            ActivatePart(characterRandomizer.allGender.shoulder_Attachment_Right[index]);
-            if (characterRandomizer.allGender.shoulder_Attachment_Left.Count > index)
-                ActivatePart(characterRandomizer.allGender.shoulder_Attachment_Left[index]);
-        }
-        
-        // ELBOWS
-        if (characterRandomizer.allGender.elbow_Attachment_Right.Count > 0)
-        {
-            int index = Mathf.Clamp(currentElbowIndex, 0, characterRandomizer.allGender.elbow_Attachment_Right.Count - 1);
-            ActivatePart(characterRandomizer.allGender.elbow_Attachment_Right[index]);
-            if (characterRandomizer.allGender.elbow_Attachment_Left.Count > index)
-                ActivatePart(characterRandomizer.allGender.elbow_Attachment_Left[index]);
-        }
-        
-        // HIP ARMOR
-        if (characterRandomizer.allGender.hips_Attachment.Count > 0)
-        {
-            int index = Mathf.Clamp(currentHipArmorIndex, 0, characterRandomizer.allGender.hips_Attachment.Count - 1);
-            ActivatePart(characterRandomizer.allGender.hips_Attachment[index]);
-        }
-        
-        // KNEES
-        if (characterRandomizer.allGender.knee_Attachement_Right.Count > 0)
-        {
-            int index = Mathf.Clamp(currentKneeIndex, 0, characterRandomizer.allGender.knee_Attachement_Right.Count - 1);
-            ActivatePart(characterRandomizer.allGender.knee_Attachement_Right[index]);
-            if (characterRandomizer.allGender.knee_Attachement_Left.Count > index)
-                ActivatePart(characterRandomizer.allGender.knee_Attachement_Left[index]);
-        }
-        
-        // ELF EARS
+        // Elf ears
         if (currentRace == Race.Elf && characterRandomizer.allGender.elf_Ear.Count > 0)
         {
             ActivatePart(characterRandomizer.allGender.elf_Ear[0]);
         }
+        
+        UpdateColors();
+    }
+    
+    void ActivatePartByName(string partName, List<GameObject> partList, int? overrideIndex = null)
+    {
+        if (partList.Count == 0) return;
+        
+        int index = overrideIndex ?? partIndices.GetValueOrDefault(partName, 0);
+        index = Mathf.Clamp(index, 0, partList.Count - 1);
+        
+        ActivatePart(partList[index]);
     }
     
     void ActivatePart(GameObject part)
@@ -420,50 +512,124 @@ public class CharacterCreationController : MonoBehaviour
     
     void UpdateUI()
     {
-        CharacterObjectGroups parts = (currentGender == Gender.Male) ? 
-            characterRandomizer.male : characterRandomizer.female;
-        
         if (genderText) genderText.text = currentGender.ToString();
         if (raceText) raceText.text = currentRace.ToString();
-        if (headText) headText.text = (currentHeadIndex + 1) + "/" + parts.headAllElements.Count;
-        if (hairText) hairText.text = (currentHairIndex + 1) + "/" + characterRandomizer.allGender.all_Hair.Count;
-        if (facialHairText) facialHairText.text = (currentFacialHairIndex + 1) + "/" + parts.facialHair.Count;
-        if (torsoText) torsoText.text = (currentTorsoIndex + 1) + "/" + parts.torso.Count;
-        if (armUpperText) armUpperText.text = (currentArmUpperIndex + 1) + "/" + parts.arm_Upper_Right.Count;
-        if (armLowerText) armLowerText.text = (currentArmLowerIndex + 1) + "/" + parts.arm_Lower_Right.Count;
-        if (handText) handText.text = (currentHandIndex + 1) + "/" + parts.hand_Right.Count;
-        if (hipsText) hipsText.text = (currentHipsIndex + 1) + "/" + parts.hips.Count;
-        if (legsText) legsText.text = (currentLegsIndex + 1) + "/" + parts.leg_Right.Count;
-        if (chestArmorText) chestArmorText.text = (currentChestArmorIndex + 1) + "/" + characterRandomizer.allGender.chest_Attachment.Count;
-        if (backText) backText.text = (currentBackIndex + 1) + "/" + characterRandomizer.allGender.back_Attachment.Count;
-        if (shoulderText) shoulderText.text = (currentShoulderIndex + 1) + "/" + characterRandomizer.allGender.shoulder_Attachment_Right.Count;
-        if (elbowText) elbowText.text = (currentElbowIndex + 1) + "/" + characterRandomizer.allGender.elbow_Attachment_Right.Count;
-        if (hipArmorText) hipArmorText.text = (currentHipArmorIndex + 1) + "/" + characterRandomizer.allGender.hips_Attachment.Count;
-        if (kneeText) kneeText.text = (currentKneeIndex + 1) + "/" + characterRandomizer.allGender.knee_Attachement_Right.Count;
+        
+        // Update body part texts (loop)
+        foreach (BodyPartText bpt in bodyPartTexts)
+        {
+            if (bpt.text != null && partIndices.ContainsKey(bpt.partName))
+            {
+                int count = GetPartMaxCount(bpt.partName);
+                
+                // Special display for helmet
+                if (bpt.partName == "Helmet")
+                {
+                    int helmetIndex = partIndices["Helmet"];
+                    if (helmetIndex == 0)
+                    {
+                        bpt.text.text = "None";
+                    }
+                    else
+                    {
+                        bpt.text.text = helmetIndex + "/" + (count - 1);
+                    }
+                }
+                else
+                {
+                    bpt.text.text = (partIndices[bpt.partName] + 1) + "/" + count;
+                }
+            }
+        }
+        
+        // Update color texts (loop)
+        foreach (ColorText ct in colorTexts)
+        {
+            if (ct.text == null) continue;
+            
+            if (ct.colorName == "SkinColor")
+            {
+                ct.text.text = currentSkinColor.ToString();
+            }
+            else if (colorIndices.ContainsKey(ct.colorName))
+            {
+                int currentIndex = colorIndices[ct.colorName];
+                
+                // Special handling for hair color to show correct count per skin
+                if (ct.colorName == "HairColor")
+                {
+                    Color[] hairColors = GetHairColorArray();
+                    ct.text.text = (currentIndex + 1) + "/" + hairColors.Length;
+                }
+                else
+                {
+                    int count = GetColorMaxCount(ct.colorName);
+                    ct.text.text = (currentIndex + 1) + "/" + count;
+                }
+            }
+        }
     }
     
     void ConfirmCharacter()
     {
+        // Save gender and race
         PlayerPrefs.SetString("CharacterGender", currentGender.ToString());
         PlayerPrefs.SetString("CharacterRace", currentRace.ToString());
-        PlayerPrefs.SetInt("CharacterHead", currentHeadIndex);
-        PlayerPrefs.SetInt("CharacterHair", currentHairIndex);
-        PlayerPrefs.SetInt("CharacterFacialHair", currentFacialHairIndex);
-        PlayerPrefs.SetInt("CharacterTorso", currentTorsoIndex);
-        PlayerPrefs.SetInt("CharacterArmUpper", currentArmUpperIndex);
-        PlayerPrefs.SetInt("CharacterArmLower", currentArmLowerIndex);
-        PlayerPrefs.SetInt("CharacterHand", currentHandIndex);
-        PlayerPrefs.SetInt("CharacterHips", currentHipsIndex);
-        PlayerPrefs.SetInt("CharacterLegs", currentLegsIndex);
-        PlayerPrefs.SetInt("CharacterChestArmor", currentChestArmorIndex);
-        PlayerPrefs.SetInt("CharacterBack", currentBackIndex);
-        PlayerPrefs.SetInt("CharacterShoulder", currentShoulderIndex);
-        PlayerPrefs.SetInt("CharacterElbow", currentElbowIndex);
-        PlayerPrefs.SetInt("CharacterHipArmor", currentHipArmorIndex);
-        PlayerPrefs.SetInt("CharacterKnee", currentKneeIndex);
+        PlayerPrefs.SetString("CharacterSkinColor", currentSkinColor.ToString());
+        
+        // Save all part indices (loop)
+        foreach (var kvp in partIndices)
+        {
+            PlayerPrefs.SetInt("Character" + kvp.Key, kvp.Value);
+        }
+        
+        // Save all color indices (loop)
+        foreach (var kvp in colorIndices)
+        {
+            PlayerPrefs.SetInt("Character" + kvp.Key, kvp.Value);
+        }
+        
         PlayerPrefs.Save();
         
-        Debug.Log("Character saved! Loading game...");
+        // DESTROY ALL CANVASES BEFORE LOADING NEW SCENE
+        Canvas[] allCanvases = FindObjectsOfType<Canvas>();
+        foreach (Canvas canvas in allCanvases)
+        {
+            Destroy(canvas.gameObject);
+        }
+        
+        Debug.Log("✅ Character saved! Loading game...");
         SceneManager.LoadScene(gameSceneName);
     }
+}
+
+// Serializable classes for Inspector arrays
+[System.Serializable]
+public class BodyPartButtons
+{
+    public string partName;
+    public Button nextButton;
+    public Button prevButton;
+}
+
+[System.Serializable]
+public class BodyPartText
+{
+    public string partName;
+    public TMP_Text text;
+}
+
+[System.Serializable]
+public class ColorButtons
+{
+    public string colorName;
+    public Button nextButton;
+    public Button prevButton;
+}
+
+[System.Serializable]
+public class ColorText
+{
+    public string colorName;
+    public TMP_Text text;
 }

@@ -6,8 +6,17 @@ EditorBuildSettings:
   serializedVersion: 2
   m_Scenes:
   - enabled: 1
+    path: Assets/Scenes/CharacterCreation.unity
+    guid: a4ccdb7dafa21e34f9331d36f941cc25
+  - enabled: 1
+    path: Assets/Scenes/Fantasy.unity
+    guid: 288cb6bb20e3e95449b117f8122268b8
+  - enabled: 1
     path: Assets/Scenes/Hub.unity
     guid: 99c9720ab356a0642a771bea13969a05
+  - enabled: 1
+    path: Assets/Scenes/Dungeon.unity
+    guid: b14f552af7615824381093119902e0a7
   m_configObjects:
     com.unity.input.settings.actions: {fileID: -944628639613478452, guid: 052faaac586de48259a63d0c4782560b, type: 3}
   m_UseUCBPForAssetBundles: 0

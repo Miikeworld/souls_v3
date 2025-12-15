@@ -94,11 +94,6 @@ namespace PsychoticLab
             }
             */
 
-            GUIStyle style = new GUIStyle();
-            style.normal.textColor = Color.white;
-            style.fontStyle = FontStyle.Bold;
-            style.fontSize = 24;
-            GUI.Label(new Rect(10, 10, 150, 50), "Hold Right Mouse Button Down\nor use W A S D To Rotate.", style);
         }
 
         private void Start()
