@@ -132,10 +132,10 @@ namespace PsychoticLab
             Transform cam = Camera.main.transform;
             if(cam)
             {
-                cam.position = transform.position + new Vector3(0, 0.3f, 2);
+                cam.position = transform.position + new Vector3(-1, 0.3f, 2);
                 cam.rotation = Quaternion.Euler(0, -180, 0);
                 camHolder = new GameObject().transform;
-                camHolder.position = transform.position + new Vector3(0, 1, 0);
+                camHolder.position = transform.position + new Vector3(-1, 1, 0);
                 cam.LookAt(camHolder);
                 cam.SetParent(camHolder);
             }

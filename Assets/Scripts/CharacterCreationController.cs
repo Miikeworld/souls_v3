@@ -598,7 +598,7 @@ public class CharacterCreationController : MonoBehaviour
             Destroy(canvas.gameObject);
         }
         
-        Debug.Log("✅ Character saved! Loading game...");
+        Debug.Log("Character saved");
         SceneManager.LoadScene(gameSceneName);
     }
 }
