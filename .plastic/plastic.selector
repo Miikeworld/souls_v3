@@ -1,0 +1,4 @@
+repository "souls_v3/souls_v3@5773892075523@cloud"
+  path "/"
+    br "/main"
+    co "/main"

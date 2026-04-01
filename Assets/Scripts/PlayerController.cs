@@ -1,4 +1,5 @@
 using UnityEngine;
+using System.Collections;
 
 [RequireComponent(typeof(CharacterController))]
 public class PlayerController : Entity
@@ -10,6 +11,10 @@ public class PlayerController : Entity
     public float jumpForce = 5f;
     public float jumpStaminaCost = 15f;
     public float gravity = -20f;
+    
+    [Header("Animation")]
+    public Animator animator;
+    public float animationSpeedMultiplier = 1f;
     
     [Header("Roll/Dodge")]
     public float rollSpeed = 10f;
@@ -51,6 +56,10 @@ public class PlayerController : Entity
         
         controller = GetComponent<CharacterController>();
         
+        // Get animator if not assigned
+        if (animator == null)
+            animator = GetComponent<Animator>();
+        
         // Create cast point if missing
         if (castPoint == null)
         {
@@ -86,6 +95,29 @@ public class PlayerController : Entity
         }
         
         ApplyGravity();
+        
+        // Update animations
+        UpdateAnimations();
+    }
+    
+    void UpdateAnimations()
+    {
+        if (animator == null) return;
+        
+        // Movement animations
+        float speed = new Vector3(velocity.x, 0, velocity.z).magnitude;
+        animator.SetFloat("Speed", speed * animationSpeedMultiplier);
+        
+        // Ground state
+        animator.SetBool("IsGrounded", controller.isGrounded);
+        
+        // Combat states
+        animator.SetBool("IsAttacking", isAttacking);
+        animator.SetBool("IsDodging", isRolling);
+        animator.SetBool("IsBlocking", Input.GetKey(KeyCode.Mouse1));
+        
+        // Jump state
+        animator.SetBool("IsJumping", !controller.isGrounded && velocity.y > 0);
     }
     
     void HandleInput()
@@ -106,7 +138,14 @@ public class PlayerController : Entity
             if (UseMana(fireballManaCost))
             {
                 CastFireball();
+                attackTimer = attackCooldown;
             }
+        }
+        
+        // Use Potion (R key)
+        if (Input.GetKeyDown(KeyCode.R))
+        {
+            UsePotion();
         }
         
         // Jump (F key)
@@ -226,6 +265,13 @@ public class PlayerController : Entity
     
     void PerformMeleeAttack()
     {
+        // Trigger attack animation
+        if (animator != null)
+        {
+            animator.SetTrigger("Attack");
+            animator.SetInteger("AttackType", 1); // Light attack
+        }
+        
         Collider[] hitEnemies = Physics.OverlapSphere(transform.position + transform.forward, attackRange);
         
         foreach (Collider col in hitEnemies)
@@ -263,7 +309,23 @@ public class PlayerController : Entity
     protected override void Die()
     {
         base.Die();
-        enabled = false;
+        
+        // Respawn player after delay
+        StartCoroutine(RespawnCoroutine());
+    }
+    
+    IEnumerator RespawnCoroutine()
+    {
+        yield return new WaitForSeconds(3f);
+        
+        // Respawn at last bonfire
+        GameManager.Instance.RespawnPlayer(gameObject);
+        
+        // Respawn enemies
+        GameManager.Instance.RespawnEnemies();
+        
+        // Re-enable player controller
+        enabled = true;
     }
     
     void OnDrawGizmosSelected()

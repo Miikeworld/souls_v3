@@ -33,7 +33,7 @@ System.Collections.IEnumerator DestroyTextForever()
             {
                 if (text.text.Contains("Mouse") || text.text.Contains("WASD") || text.text.Contains("Rotate"))
                 {
-                    Debug.Log("💀 FOUND AND DESTROYING: " + canvas.gameObject.name);
+                    Debug.Log(canvas.gameObject.name);
                     Destroy(canvas.gameObject);
                     break;
                 }
@@ -45,7 +45,7 @@ System.Collections.IEnumerator DestroyTextForever()
             {
                 if (text.text.Contains("Mouse") || text.text.Contains("WASD") || text.text.Contains("Rotate"))
                 {
-                    Debug.Log("💀 FOUND AND DESTROYING: " + canvas.gameObject.name);
+                    Debug.Log(canvas.gameObject.name);
                     Destroy(canvas.gameObject);
                     break;
                 }
@@ -55,7 +55,7 @@ System.Collections.IEnumerator DestroyTextForever()
 }
 
     
-    void LoadCharacter()
+    public void LoadCharacter()
     {
         if (characterRandomizer == null)
         {
@@ -212,7 +212,7 @@ System.Collections.IEnumerator DestroyTextForever()
             Destroy(canvas.gameObject);
         }
         
-        Debug.Log("✅ Character loaded and cleaned!");
+        Debug.Log("Character loaded and cleaned!");
     }
     
     void ActivatePart(List<GameObject> partList, int index)

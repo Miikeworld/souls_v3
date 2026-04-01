@@ -29,7 +29,7 @@ public class CharacterCreationController : MonoBehaviour
     public ColorText[] colorTexts;
     
     [Header("Settings")]
-    public string gameSceneName = "GameScene";
+    public string gameSceneName = "Fantasy";
     
     // Current selections
     private Gender currentGender = Gender.Male;
@@ -599,6 +599,13 @@ public class CharacterCreationController : MonoBehaviour
         }
         
         Debug.Log("Character saved");
+        
+        // Notify GameManager that character was created
+        if (GameManager.Instance != null)
+        {
+            GameManager.Instance.OnCharacterCreated();
+        }
+        
         SceneManager.LoadScene(gameSceneName);
     }
 }

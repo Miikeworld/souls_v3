@@ -17,6 +17,7 @@ public abstract class EnemySkeleton : Entity
     [Header("References")]
     public Transform player;
     public Transform lockOnPoint;
+    public Animator animator;
 
     [Header("Defense")]
     public float armor = 0f;
@@ -46,8 +47,11 @@ public abstract class EnemySkeleton : Entity
         if (rb != null)
         {
             rb.constraints = RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ;
-            rb.interpolation = RigidbodyInterpolation.Interpolate;
         }
+        
+        // Get animator if not assigned
+        if (animator == null)
+            animator = GetComponent<Animator>();
         
         if (player == null)
         {
@@ -72,6 +76,21 @@ public abstract class EnemySkeleton : Entity
         
         attackCooldown -= Time.deltaTime;
         UpdateState();
+        UpdateAnimations();
+    }
+    
+    protected virtual void UpdateAnimations()
+    {
+        if (animator == null) return;
+        
+        // Movement speed
+        float speed = rb != null ? new Vector3(rb.linearVelocity.x, 0, rb.linearVelocity.z).magnitude : 0f;
+        animator.SetFloat("Speed", speed);
+        
+        // Combat states
+        animator.SetBool("IsAttacking", currentState == State.Attack);
+        animator.SetBool("IsAlerted", currentState == State.Chase);
+        animator.SetBool("IsDead", currentState == State.Dead);
     }
     
     protected virtual void FixedUpdate()
@@ -213,6 +232,10 @@ public abstract class EnemySkeleton : Entity
     {
         base.Die();
         currentState = State.Dead;
+        
+        // Trigger death animation
+        if (animator != null)
+            animator.SetTrigger("Die");
         
         if (rb != null) rb.isKinematic = true;
         

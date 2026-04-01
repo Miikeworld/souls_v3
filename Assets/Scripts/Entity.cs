@@ -6,8 +6,12 @@ public abstract class Entity : MonoBehaviour
     [Header("Health")]
     public float maxHealth = 100f;
     public float currentHealth;
-    public float healthRegenRate = 5f; // HP per second
-    public float healthRegenDelay = 3f; // Delay after taking damage
+    public float healAmount = 30f; // Amount healed by bonfire
+    public float healStaminaCost = 20f; // Stamina cost to heal
+    
+    [Header("Potions")]
+    public int maxPotions = 10;
+    public int currentPotions = 5;
     
     [Header("Mana")]
     public float maxMana = 100f;
@@ -27,9 +31,10 @@ public abstract class Entity : MonoBehaviour
     public event Action OnHealthChanged;
     public event Action OnManaChanged;
     public event Action OnStaminaChanged;
+    public event Action OnPotionsChanged;
     public event Action OnDeath;
     
-    protected bool isDead = false;
+    public bool isDead = false;
     protected float healthRegenTimer = 0f;
     protected float staminaRegenTimer = 0f;
     
@@ -39,6 +44,7 @@ public abstract class Entity : MonoBehaviour
         currentHealth = maxHealth;
         currentMana = maxMana;
         currentStamina = maxStamina;
+        currentPotions = 5; // Start with 5 potions
         
         InvokeResourceEvents();
     }
@@ -52,15 +58,7 @@ public abstract class Entity : MonoBehaviour
     
     protected virtual void RegenerateResources()
     {
-        // Health regeneration (with delay)
-        if (healthRegenTimer > 0f)
-        {
-            healthRegenTimer -= Time.deltaTime;
-        }
-        else if (currentHealth < maxHealth)
-        {
-            ModifyHealth(healthRegenRate * Time.deltaTime);
-        }
+        // Health regeneration (removed - only heal at bonfires)
         
         // Mana regeneration (constant)
         if (currentMana < maxMana)
@@ -86,9 +84,6 @@ public abstract class Entity : MonoBehaviour
         
         currentHealth -= damage;
         currentHealth = Mathf.Max(currentHealth, 0f);
-        
-        // Reset health regen timer
-        healthRegenTimer = healthRegenDelay;
         
         OnHealthChanged?.Invoke();
         
@@ -116,6 +111,65 @@ public abstract class Entity : MonoBehaviour
         if (showDebug)
         {
             Debug.Log(gameObject.name + " healed for " + amount + ". HP: " + currentHealth);
+        }
+    }
+    
+    public virtual bool TryHeal()
+    {
+        if (isDead) return false;
+        if (currentHealth >= maxHealth) return false;
+        if (!UseStamina(healStaminaCost)) return false;
+        
+        float healAmount = this.healAmount;
+        
+        // Don't overheal
+        float maxHeal = maxHealth - currentHealth;
+        if (healAmount > maxHeal)
+            healAmount = maxHeal;
+        
+        ModifyHealth(healAmount);
+        
+        if (showDebug)
+        {
+            Debug.Log(gameObject.name + " healed for " + healAmount + " HP using stamina. HP: " + currentHealth);
+        }
+        
+        return true;
+    }
+    
+    public virtual bool UsePotion()
+    {
+        if (isDead) return false;
+        if (currentPotions <= 0) return false;
+        if (currentHealth >= maxHealth) return false;
+        
+        currentPotions--;
+        float healAmount = 50f; // Potions heal 50 HP
+        
+        // Don't overheal
+        float maxHeal = maxHealth - currentHealth;
+        if (healAmount > maxHeal)
+            healAmount = maxHeal;
+        
+        ModifyHealth(healAmount);
+        OnPotionsChanged?.Invoke();
+        
+        if (showDebug)
+        {
+            Debug.Log(gameObject.name + " used potion. Healed for " + healAmount + " HP. Potions remaining: " + currentPotions);
+        }
+        
+        return true;
+    }
+    
+    public virtual void RestorePotions()
+    {
+        currentPotions = maxPotions;
+        OnPotionsChanged?.Invoke();
+        
+        if (showDebug)
+        {
+            Debug.Log(gameObject.name + " potions restored to max: " + currentPotions);
         }
     }
     
@@ -210,10 +264,11 @@ public abstract class Entity : MonoBehaviour
         }
     }
     
-    protected void InvokeResourceEvents()
+    public void InvokeResourceEvents()
     {
         OnHealthChanged?.Invoke();
         OnManaChanged?.Invoke();
         OnStaminaChanged?.Invoke();
+        OnPotionsChanged?.Invoke();
     }
 }

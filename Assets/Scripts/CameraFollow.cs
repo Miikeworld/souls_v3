@@ -73,29 +73,50 @@ public class CameraFollow : MonoBehaviour
 
     void UpdateLockedCamera()
     {
-        Vector3 directionToTarget = (lockOnTarget.position - target.position).normalized;
+        // Calculate direction from player to enemy
+        Vector3 directionToEnemy = lockOnTarget.position - target.position;
+        directionToEnemy.y = 0; // Keep horizontal for direction
         
+        // Calculate the angle player should face
+        float targetAngle = Mathf.Atan2(directionToEnemy.x, directionToEnemy.z) * Mathf.Rad2Deg;
+        Quaternion targetRotation = Quaternion.Euler(0, targetAngle, 0);
+        
+        // Smoothly rotate player to face enemy (optional - remove if you want manual control)
+        // target.rotation = Quaternion.Slerp(target.rotation, targetRotation, 5f * Time.deltaTime);
+        
+        // Calculate camera position relative to player's intended facing direction
+        Vector3 cameraOffset = targetRotation * lockOnOffset;
+        Vector3 desiredPosition = target.position + cameraOffset;
+        
+        // Allow some manual orbit adjustment with mouse
         float mouseX = Input.GetAxis("Mouse X") * mouseSensitivity * 0.5f;
         yaw += mouseX;
         
-        Quaternion targetRotation = Quaternion.LookRotation(directionToTarget);
-        float targetYaw = targetRotation.eulerAngles.y;
+        // Apply mouse rotation to the camera offset
+        Quaternion mouseRotation = Quaternion.Euler(0, yaw - targetAngle, 0);
+        cameraOffset = mouseRotation * lockOnOffset;
+        desiredPosition = target.position + cameraOffset;
         
-        float blendedYaw = Mathf.LerpAngle(yaw, targetYaw, lockOnRotationSpeed * Time.deltaTime);
-        yaw = blendedYaw;
-        
-        Quaternion rotation = Quaternion.Euler(0f, yaw, 0f);
-        Vector3 desiredPosition = target.position + rotation * lockOnOffset;
-
+        // Smooth camera movement
         float smoothFactor = 1f - Mathf.Pow(0.5f, positionSmoothSpeed * Time.deltaTime);
         transform.position = Vector3.Lerp(transform.position, desiredPosition, smoothFactor);
-
-        transform.LookAt(lockOnTarget.position);
+        
+        // Camera should look at the enemy, not the player
+        Vector3 lookAtPosition = lockOnTarget.position + Vector3.up * 1f; // Look at enemy's chest/head
+        transform.LookAt(lookAtPosition);
     }
 
     public void SetLockOnTarget(Transform target)
     {
         lockOnTarget = target;
         isLockedOn = (target != null);
+        
+        if (isLockedOn && target != null)
+        {
+            // Initialize yaw to face the enemy when locking on
+            Vector3 directionToEnemy = target.position - this.target.position;
+            float targetAngle = Mathf.Atan2(directionToEnemy.x, directionToEnemy.z) * Mathf.Rad2Deg;
+            yaw = targetAngle;
+        }
     }
 }
