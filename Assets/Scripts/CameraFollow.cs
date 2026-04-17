@@ -7,7 +7,7 @@ public class CameraFollow : MonoBehaviour
 
     [Header("Positioning")]
     public Vector3 offset = new Vector3(0f, 2f, -4f);
-    public Vector3 lockOnOffset = new Vector3(1f, 1.5f, -3f);
+    public Vector3 lockOnOffset = new Vector3(1f, 0.8f, -3f);
 
     [Header("Rotation")]
     public float mouseSensitivity = 2f;
@@ -73,37 +73,29 @@ public class CameraFollow : MonoBehaviour
 
     void UpdateLockedCamera()
     {
-        // Calculate direction from player to enemy
+        // Direction from player to enemy (horizontal only)
         Vector3 directionToEnemy = lockOnTarget.position - target.position;
-        directionToEnemy.y = 0; // Keep horizontal for direction
+        directionToEnemy.y = 0;
         
-        // Calculate the angle player should face
         float targetAngle = Mathf.Atan2(directionToEnemy.x, directionToEnemy.z) * Mathf.Rad2Deg;
-        Quaternion targetRotation = Quaternion.Euler(0, targetAngle, 0);
         
-        // Smoothly rotate player to face enemy (optional - remove if you want manual control)
-        // target.rotation = Quaternion.Slerp(target.rotation, targetRotation, 5f * Time.deltaTime);
+        // Smoothly interpolate only the yaw — no tilt, no roll
+        yaw = Mathf.LerpAngle(yaw, targetAngle, lockOnRotationSpeed * Time.deltaTime);
+        float fixedPitch = 10f; // constant downward angle, zero tilt
         
-        // Calculate camera position relative to player's intended facing direction
-        Vector3 cameraOffset = targetRotation * lockOnOffset;
+        // Set rotation directly — pitch and roll are always locked
+        transform.rotation = Quaternion.Euler(fixedPitch, yaw, 0f);
+        
+        // Position camera behind the player based on smoothed yaw
+        Quaternion facingRotation = Quaternion.Euler(0, yaw, 0);
+        Vector3 cameraOffset = facingRotation * lockOnOffset;
         Vector3 desiredPosition = target.position + cameraOffset;
         
-        // Allow some manual orbit adjustment with mouse
-        float mouseX = Input.GetAxis("Mouse X") * mouseSensitivity * 0.5f;
-        yaw += mouseX;
-        
-        // Apply mouse rotation to the camera offset
-        Quaternion mouseRotation = Quaternion.Euler(0, yaw - targetAngle, 0);
-        cameraOffset = mouseRotation * lockOnOffset;
-        desiredPosition = target.position + cameraOffset;
-        
-        // Smooth camera movement
+        // Smooth camera position
         float smoothFactor = 1f - Mathf.Pow(0.5f, positionSmoothSpeed * Time.deltaTime);
         transform.position = Vector3.Lerp(transform.position, desiredPosition, smoothFactor);
         
-        // Camera should look at the enemy, not the player
-        Vector3 lookAtPosition = lockOnTarget.position + Vector3.up * 1f; // Look at enemy's chest/head
-        transform.LookAt(lookAtPosition);
+        pitch = fixedPitch;
     }
 
     public void SetLockOnTarget(Transform target)

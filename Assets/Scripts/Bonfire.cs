@@ -38,6 +38,12 @@ public class Bonfire : MonoBehaviour
     private PlayerController playerController;
     private bool isUIActive = false;
     
+    // Auto-created prompt UI
+    private static GameObject promptCanvas;
+    private static TextMeshProUGUI promptText;
+    private static GameObject promptPanel;
+    private static Bonfire activePromptBonfire;
+    
     void Start()
     {
         Debug.Log("Bonfire Start() called for: " + gameObject.name);
@@ -55,6 +61,9 @@ public class Bonfire : MonoBehaviour
         
         // Set initial visual state
         UpdateVisualState();
+        
+        // Auto-create interaction prompt if none exists
+        CreatePromptUI();
         
         // Hide UI elements initially
         if (interactionPrompt != null)
@@ -82,6 +91,9 @@ public class Bonfire : MonoBehaviour
     
     void Update()
     {
+        // Distance-based detection (more reliable than trigger colliders)
+        CheckPlayerDistance();
+        
         // Toggle UI with B key when near bonfire
         if (Input.GetKeyDown(KeyCode.B))
         {
@@ -97,29 +109,45 @@ public class Bonfire : MonoBehaviour
             CloseUI();
         }
         
-        // Debug input check
-        if (Input.GetKeyDown(KeyCode.E))
-        {
-            Debug.Log("E key pressed! playerInRange: " + playerInRange);
-        }
-        
         // Check for player input when in range
         if (playerInRange && Input.GetKeyDown(KeyCode.E))
         {
-            Debug.Log("E pressed while in range - opening bonfire menu");
             OpenBonfireMenu();
         }
+    }
+    
+    void CheckPlayerDistance()
+    {
+        if (isUIActive) return;
         
-        // Visual test - draw debug sphere
-        if (playerInRange)
+        GameObject playerObj = GameObject.FindGameObjectWithTag("Player");
+        if (playerObj == null) return;
+        
+        float distance = Vector3.Distance(transform.position, playerObj.transform.position);
+        bool wasInRange = playerInRange;
+        playerInRange = distance <= healRange;
+        
+        // Player just entered range
+        if (playerInRange && !wasInRange)
         {
-            Debug.DrawLine(transform.position, transform.position + Vector3.up * 2f, Color.green);
+            playerEntity = playerObj.GetComponent<Entity>();
+            ShowPrompt(this);
+        }
+        
+        // Player just left range
+        if (!playerInRange && wasInRange)
+        {
+            playerEntity = null;
+            HidePrompt(this);
         }
     }
     
     void OpenBonfireMenu()
     {
         Debug.Log("OpenBonfireMenu called");
+        
+        // Hide the interaction prompt
+        HidePrompt(this);
         
         // First, do the bonfire interaction (full heal, restore potions, set respawn)
         InteractWithBonfire();
@@ -236,6 +264,66 @@ public class Bonfire : MonoBehaviour
         // You can implement stat allocation, skill upgrades, etc.
     }
     
+    static void CreatePromptUI()
+    {
+        if (promptCanvas != null) return; // already created
+        
+        // Create Canvas
+        promptCanvas = new GameObject("BonfirePromptCanvas");
+        Canvas canvas = promptCanvas.AddComponent<Canvas>();
+        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        canvas.sortingOrder = 100;
+        promptCanvas.AddComponent<CanvasScaler>().uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        promptCanvas.GetComponent<CanvasScaler>().referenceResolution = new Vector2(1920, 1080);
+        promptCanvas.AddComponent<GraphicRaycaster>();
+        DontDestroyOnLoad(promptCanvas);
+        
+        // Create background panel at bottom of screen
+        promptPanel = new GameObject("PromptPanel");
+        promptPanel.transform.SetParent(promptCanvas.transform, false);
+        RectTransform panelRect = promptPanel.AddComponent<RectTransform>();
+        panelRect.anchorMin = new Vector2(0.3f, 0.02f);
+        panelRect.anchorMax = new Vector2(0.7f, 0.1f);
+        panelRect.offsetMin = Vector2.zero;
+        panelRect.offsetMax = Vector2.zero;
+        Image panelImg = promptPanel.AddComponent<Image>();
+        panelImg.color = new Color(0f, 0f, 0f, 0.7f);
+        
+        // Create text
+        GameObject textObj = new GameObject("PromptText");
+        textObj.transform.SetParent(promptPanel.transform, false);
+        RectTransform textRect = textObj.AddComponent<RectTransform>();
+        textRect.anchorMin = Vector2.zero;
+        textRect.anchorMax = Vector2.one;
+        textRect.offsetMin = new Vector2(10, 0);
+        textRect.offsetMax = new Vector2(-10, 0);
+        promptText = textObj.AddComponent<TextMeshProUGUI>();
+        promptText.alignment = TextAlignmentOptions.Center;
+        promptText.fontSize = 24;
+        promptText.color = Color.white;
+        
+        promptPanel.SetActive(false);
+    }
+    
+    static void ShowPrompt(Bonfire bonfire)
+    {
+        activePromptBonfire = bonfire;
+        if (promptText != null)
+            promptText.text = $"<size=28>{bonfire.bonfireName}</size>\nPress <color=#FFD700>E</color> to interact";
+        if (promptPanel != null)
+            promptPanel.SetActive(true);
+    }
+    
+    static void HidePrompt(Bonfire bonfire)
+    {
+        if (activePromptBonfire == bonfire)
+        {
+            if (promptPanel != null)
+                promptPanel.SetActive(false);
+            activePromptBonfire = null;
+        }
+    }
+    
     void OnTriggerEnter(Collider other)
     {
         Debug.Log("Bonfire: OnTriggerEnter with " + other.name + ", tag: " + other.tag);
@@ -247,7 +335,10 @@ public class Bonfire : MonoBehaviour
             
             Debug.Log("Player entered bonfire range. Player entity: " + (playerEntity != null ? "found" : "not found"));
             
-            // Show interaction prompt
+            // Show bottom-screen interaction prompt
+            ShowPrompt(this);
+            
+            // Show legacy prompt if assigned
             if (interactionPrompt != null)
                 interactionPrompt.SetActive(true);
                 
@@ -266,7 +357,10 @@ public class Bonfire : MonoBehaviour
             playerInRange = false;
             playerEntity = null;
             
-            // Hide UI elements
+            // Hide bottom-screen prompt
+            HidePrompt(this);
+            
+            // Hide legacy UI elements
             if (interactionPrompt != null)
                 interactionPrompt.SetActive(false);
                 
