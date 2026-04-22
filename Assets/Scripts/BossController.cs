@@ -1,1564 +1,761 @@
 using UnityEngine;
+using UnityEngine.AI;
 using System.Collections;
+using System.Collections.Generic;
 
 public class BossController : Entity
 {
+    // ══════════════════════════════════════════════════════════════
+    //  ENUMS
+    // ══════════════════════════════════════════════════════════════
+    public enum BossState { Idle, Chasing, Attacking, Evading, Dead }
+
+    // ══════════════════════════════════════════════════════════════
+    //  INSPECTOR
+    // ══════════════════════════════════════════════════════════════
     [Header("Boss Settings")]
-    public string bossName = "Ancient Guardian";
-    public float detectionRange = 15f;
-    public float attackRange = 3f;
-    public float rotationSpeed = 5f;
-    
-    [Header("Movement")]
-    public float moveSpeed = 3f;
-    public float chargeSpeed = 8f;
-    public float chargeDuration = 1.5f;
-    public float stopDistance = 1f;
-    
-    [Header("Pathfinding")]
-    public float obstacleCheckDistance = 2f;
-    public float avoidanceAngle = 45f;
-    public LayerMask obstacleLayer = -1; // All layers by default
-    
-    [Header("Combat")]
-    public float meleeDamage = 25f;
-    public float heavyDamage = 40f;
-    public float attackCooldown = 2f;
-    public float heavyAttackCooldown = 4f;
-    
-    [Header("Special Abilities")]
-    public GameObject groundSlamPrefab;
+    public string bossName = "Arcane Tyrant";
+    public float detectionRange = 25f;
+    public float rotationSpeed = 8f;
+    public float walkSpeed = 3.5f;
+    public float runSpeed = 5.5f;
+
+    [Header("Combat — Ranged")]
+    public float attackRange = 15f;
+    public float preferredRange = 8f;
+    public float closeRange = 4f;
+    public float attackCooldownMin = 0.8f;
+    public float attackCooldownMax = 2.2f;
+
+    [Header("Combat — Damage")]
+    public float projectileDamage = 20f;
+    public float spellDamage = 35f;
+    public float comboDamage = 25f;
+    public float skillDamage = 50f;
+    public float damageRange = 4f;
+
+    [Header("Combat — Teleport")]
+    public float teleportDistance = 10f;
+    public float teleportCooldown = 8f;
+
+    [Header("Combat — Evade")]
+    public float evadeChance = 0.25f;
+    public float evadeCooldown = 5f;
+
+    [Header("Projectiles")]
     public GameObject projectilePrefab;
     public Transform projectileSpawnPoint;
-    public float groundSlamCooldown = 8f;
-    public float projectileCooldown = 6f;
-    public int projectileCount = 3;
-    public float projectileSpread = 30f;
-    
-    [Header("Phase System")]
-    public float phase2HealthThreshold = 0.5f;    // 50% HP
-    public float phase3HealthThreshold = 0.25f;   // 25% HP
-    public float phase4HealthThreshold = 0f;       // 0% HP (revival)
-    public bool isInPhase2 = false;
-    public bool isInPhase3 = false;
-    public bool isInPhase4 = false;
-    public bool isRevived = false;
-    
-    [Header("Phase 4 - Second Life")]
-    public float revivalHealthPercentage = 0.5f; // Revive with 50% health
-    public float maxHealthPhase4 = 500f; // Second life health pool
-    
-    [Header("Visual Effects")]
-    public GameObject[] phaseEffects;
+    public float projectileSpeed = 15f;
+
+    [Header("AOE Effects")]
+    public Material aoeRingMaterial; 
+    public float aoeRingDuration = 1f;
+
+    [Header("VFX / SFX")]
+    public GameObject teleportVFX;
     public AudioClip[] attackSounds;
     public AudioClip[] hurtSounds;
     public AudioClip deathSound;
-    
-    // Private variables
-    private Transform player;
-    private Animator animator;
-    private AudioSource audioSource;
-    private CharacterController controller;
-    
-    // Pathfinding
-    private float pathUpdateTimer = 0f;
-    
-    // Timers and states
-    private float attackTimer = 0f;
-    private float heavyAttackTimer = 0f;
-    private float groundSlamTimer = 0f;
-    private float projectileTimer = 0f;
-    private bool isAttacking = false;
-        private bool isEnraged = false;
-    
-    // AI States
-    private enum BossState { Idle, Pursuing, Attacking, SpecialAbility, Stunned, PhaseTransition }
-    private BossState currentState = BossState.Idle;
-    
-    // Phase states
-    private enum BossPhase { Phase1_Mage, Phase2_Blade, Phase3_Samurai, Phase4_LastResort }
-    private BossPhase currentPhase = BossPhase.Phase1_Mage;
-    
+
+    [Header("Hitbox (for Animation Events)")]
+    public WeaponHitbox weaponHitbox;
+
+    // ══════════════════════════════════════════════════════════════
+    //  RUNTIME STATE
+    // ══════════════════════════════════════════════════════════════
+    [HideInInspector] public BossState currentState = BossState.Idle;
+
+    private Transform      player;
+    private Animator       animator;
+    private NavMeshAgent   agent;
+    private AudioSource    audioSource;
+    private LockOnSystem   playerLockOn;
+
+    private bool  isAttacking = false;
+    private bool  useRootMotion = false;
+    private float attackCooldownTimer = 0f;
+    private float teleportCooldownTimer = 0f;
+    private float evadeCooldownTimer = 0f;
+    private int   lastAttackIndex = -1;
+    private int   consecutiveSameRange = 0;
+
+    // Pending damage — set by coroutine, consumed by animation event
+    private float pendingDamage = 0f;
+    private float pendingDamageRange = 3f;
+    private bool  pendingIsAOE = false;
+
+    // ══════════════════════════════════════════════════════════════
+    //  ATTACK TABLE — every Frank_Mage animation, categorized
+    // ══════════════════════════════════════════════════════════════
+    enum AttackType { Projectile, AOE, Combo, Teleport, Evade }
+
+    struct AttackEntry
+    {
+        public string   name;
+        public string[] clips;      // animation clip names (single or multi-hit combo)
+        public float    duration;   // total time before EndAttack
+        public float    dmgMult;    // multiplier on base damage
+        public float    range;      // effective range
+        public bool     isAOE;
+        public AttackType type;
+
+        public AttackEntry(string n, string[] c, float dur, float mult, float rng, bool aoe, AttackType t)
+        { name=n; clips=c; duration=dur; dmgMult=mult; range=rng; isAOE=aoe; type=t; }
+    }
+
+    // Built once in Start
+    private List<AttackEntry> rangedAttacks  = new List<AttackEntry>();
+    private List<AttackEntry> comboAttacks   = new List<AttackEntry>();
+    private List<AttackEntry> skillAttacks   = new List<AttackEntry>();
+    private string[] evadeAnims;
+    private string[] stepAnims;
+    private string[] hitAnims;
+
+    void BuildAttackTable()
+    {
+        // ── 6 single-cast ranged attacks ──
+        for (int i = 1; i <= 6; i++)
+            rangedAttacks.Add(new AttackEntry(
+                $"Attack{i:D2}",
+                new[] { $"Frank_RPG_Mage_Attack{i:D2}" },
+                1.4f, 1f, attackRange, false, AttackType.Projectile));
+
+        // ── 4 combo sets ──
+        comboAttacks.Add(new AttackEntry("Combo01", new[] {
+            "Frank_RPG_Mage_Combo01_1","Frank_RPG_Mage_Combo01_2","Frank_RPG_Mage_Combo01_3"
+        }, 2.1f, 0.8f, damageRange, false, AttackType.Combo));
+
+        comboAttacks.Add(new AttackEntry("Combo02", new[] {
+            "Frank_RPG_Mage_Combo02_1","Frank_RPG_Mage_Combo02_2","Frank_RPG_Mage_Combo02_3"
+        }, 2.1f, 0.9f, damageRange, false, AttackType.Combo));
+
+        comboAttacks.Add(new AttackEntry("Combo03", new[] {
+            "Frank_RPG_Mage_Combo03_1","Frank_RPG_Mage_Combo03_2","Frank_RPG_Mage_Combo03_3"
+        }, 2.1f, 1f, damageRange, false, AttackType.Combo));
+
+        comboAttacks.Add(new AttackEntry("Combo04", new[] {
+            "Frank_RPG_Mage_Combo04_1","Frank_RPG_Mage_Combo04_2","Frank_RPG_Mage_Combo04_3","Frank_RPG_Mage_Combo04_4"
+        }, 2.8f, 1.1f, damageRange, false, AttackType.Combo));
+
+        // ── Skill attacks (skip Skill03=teleport, Skill04=teleport) ──
+        for (int i = 1; i <= 7; i++)
+        {
+            if (i == 3 || i == 4) continue; // reserved for teleport
+            bool aoe = (i == 1 || i == 5 || i == 7);
+            float mult = (i <= 2) ? 1.5f : (i <= 5) ? 1.8f : 2f;
+            float dur  = (i <= 2) ? 1.8f : (i <= 5) ? 2.2f : 2.5f;
+            skillAttacks.Add(new AttackEntry(
+                $"Skill{i:D2}",
+                new[] { $"Frank_RPG_Mage_Skill{i:D2}" },
+                dur, mult, aoe ? damageRange * 1.5f : attackRange, aoe,
+                AttackType.AOE));
+        }
+
+        // ── Evades / Steps / Hits ──
+        evadeAnims = new[] { "Frank_RPG_Mage_Evade_B","Frank_RPG_Mage_Evade_F","Frank_RPG_Mage_Evade_L","Frank_RPG_Mage_Evade_R" };
+        stepAnims  = new[] { "Frank_RPG_Mage_Step_B","Frank_RPG_Mage_Step_F","Frank_RPG_Mage_Step_L","Frank_RPG_Mage_Step_R" };
+        hitAnims   = new[] { "Frank_RPG_Mage_Hit01","Frank_RPG_Mage_Hit02","Frank_RPG_Mage_Hit03" };
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    //  LIFECYCLE
+    // ══════════════════════════════════════════════════════════════
     protected override void Start()
     {
         base.Start();
-        
-        player = GameObject.FindGameObjectWithTag("Player").transform;
-        animator = GetComponent<Animator>();
-        controller = GetComponent<CharacterController>();
-        
-        // Add audio source if missing
-        if (audioSource == null)
-            audioSource = gameObject.AddComponent<AudioSource>();
-        
-        maxHealth = 1000f; // Total boss health
-        currentHealth = maxHealth;
-        InvokeResourceEvents();
+
+        player      = GameObject.FindGameObjectWithTag("Player")?.transform;
+        animator    = GetComponent<Animator>();
+        agent       = GetComponent<NavMeshAgent>();
+        audioSource = GetComponent<AudioSource>();
+        if (audioSource == null) audioSource = gameObject.AddComponent<AudioSource>();
+
+        // Disable NavMeshAgent if no valid NavMesh exists in scene
+        if (agent != null && !agent.isOnNavMesh)
+        {
+            agent.enabled = false;
+            Debug.LogWarning("[BossController] No valid NavMesh found, NavMeshAgent disabled. Boss will use transform-based movement only.");
+        }
+
+        if (weaponHitbox != null) { weaponHitbox.owner = this; weaponHitbox.Deactivate(); }
+
+        // Find lock-on system so we can break lock when teleporting
+        PlayerController pc = FindObjectOfType<PlayerController>();
+        if (pc != null) playerLockOn = pc.lockOnSystem;
+
+        // Auto-create projectile spawn point if not assigned
+        if (projectileSpawnPoint == null)
+        {
+            GameObject sp = new GameObject("ProjectileSpawn");
+            sp.transform.SetParent(transform);
+            sp.transform.localPosition = new Vector3(0f, 1.5f, 0.8f);
+            projectileSpawnPoint = sp.transform;
+        }
+
+        // Configure NavMeshAgent movement speed
+        if (agent != null)
+        {
+            agent.baseOffset = 0f;
+            agent.speed = walkSpeed;
+            agent.angularSpeed = 360f;
+            agent.acceleration = 12f;
+            agent.stoppingDistance = 0f;
+        }
+        GroundOnNavMesh();
+
+        BuildAttackTable();
+        currentState = BossState.Idle;
     }
-    
+
     protected override void Update()
     {
         base.Update();
-        
         if (isDead) return;
-        
-        UpdateTimers();
-        CheckPhaseTransitions();
-        CheckForPlayer();
-        
+
+        if (attackCooldownTimer > 0f)  attackCooldownTimer  -= Time.deltaTime;
+        if (teleportCooldownTimer > 0f) teleportCooldownTimer -= Time.deltaTime;
+        if (evadeCooldownTimer > 0f)   evadeCooldownTimer   -= Time.deltaTime;
+
         switch (currentState)
         {
-            case BossState.Idle:
-                HandleIdle();
-                break;
-            case BossState.Pursuing:
-                PursuePlayer();
-                break;
-            case BossState.Attacking:
-                HandleAttack();
-                break;
-            case BossState.SpecialAbility:
-                HandleSpecialAbility();
-                break;
-            case BossState.PhaseTransition:
-                // Handled by phase transition coroutine
-                break;
+            case BossState.Idle:     HandleIdle();    break;
+            case BossState.Chasing:  HandleChasing(); break;
+            case BossState.Attacking: break;
+            case BossState.Evading:   break;
+            case BossState.Dead:      break;
         }
-        
-        // Update animation
-        if (animator != null)
-        {
-            animator.SetFloat("Speed", controller.velocity.magnitude);
-            animator.SetBool("IsAttacking", isAttacking);
-        }
+
+        UpdateAnimatorParams();
     }
-    
-    private void UseSpecialAbility()
-    {
-        // This method is called when in SpecialAbility state
-        // The actual ability execution is handled by coroutines
-        // State will be set back to Pursuing in the coroutines
-    }
-    
-    private void UpdateTimers()
-    {
-        if (attackTimer > 0) attackTimer -= Time.deltaTime;
-        if (heavyAttackTimer > 0) heavyAttackTimer -= Time.deltaTime;
-        if (groundSlamTimer > 0) groundSlamTimer -= Time.deltaTime;
-        if (projectileTimer > 0) projectileTimer -= Time.deltaTime;
-    }
-    
-    private void CheckPhaseTransitions()
-    {
-        float healthPercent = GetHealthPercent();
-        
-        // Phase 2 transition (50% HP)
-        if (!isInPhase2 && healthPercent <= phase2HealthThreshold && currentPhase == BossPhase.Phase1_Mage)
-        {
-            StartCoroutine(TransitionToPhase2());
-        }
-        
-        // Phase 3 transition (25% HP)
-        if (!isInPhase3 && healthPercent <= phase3HealthThreshold && currentPhase == BossPhase.Phase2_Blade)
-        {
-            StartCoroutine(TransitionToPhase3());
-        }
-        
-        // Phase 4 transition (0% HP - revival)
-        if (!isInPhase4 && healthPercent <= phase4HealthThreshold && currentPhase == BossPhase.Phase3_Samurai && !isRevived)
-        {
-            StartCoroutine(TransitionToPhase4());
-        }
-    }
-    
-    float GetHealthPercent()
-    {
-        if (isRevived)
-            return currentHealth / maxHealthPhase4;
-        else
-            return currentHealth / maxHealth;
-    }
-    
-    // Phase Transition Methods
-    IEnumerator TransitionToPhase2()
-    {
-        Debug.Log("Transitioning to Phase 2: Desperate Blade");
-        currentState = BossState.PhaseTransition;
-        isAttacking = true;
-        
-        // Play transition effects
-        PlayPhaseTransitionEffect();
-        if (audioSource != null && deathSound != null)
-            audioSource.PlayOneShot(deathSound);
-            
-        yield return new WaitForSeconds(2f);
-        
-        // Update phase state
-        currentPhase = BossPhase.Phase2_Blade;
-        isInPhase2 = true;
-        
-        // Update visuals (you can swap models here)
-        UpdateBossVisuals("Phase2_Blade");
-        
-        // Reset combat timers
-        attackTimer = 0f;
-        heavyAttackTimer = 0f;
-        
-        isAttacking = false;
-        currentState = BossState.Pursuing;
-        
-        Debug.Log("Phase 2 transition complete");
-    }
-    
-    IEnumerator TransitionToPhase3()
-    {
-        Debug.Log("Transitioning to Phase 3: Abyssal Samurai");
-        currentState = BossState.PhaseTransition;
-        isAttacking = true;
-        
-        // Play transition effects
-        PlayPhaseTransitionEffect();
-        if (audioSource != null && deathSound != null)
-            audioSource.PlayOneShot(deathSound);
-            
-        yield return new WaitForSeconds(2f);
-        
-        // Update phase state
-        currentPhase = BossPhase.Phase3_Samurai;
-        isInPhase3 = true;
-        
-        // Update visuals (you can swap models here)
-        UpdateBossVisuals("Phase3_Samurai");
-        
-        // Increase movement speed for samurai phase
-        moveSpeed *= 1.5f;
-        
-        // Reset combat timers
-        attackTimer = 0f;
-        heavyAttackTimer = 0f;
-        
-        isAttacking = false;
-        currentState = BossState.Pursuing;
-        
-        Debug.Log("Phase 3 transition complete");
-    }
-    
-    IEnumerator TransitionToPhase4()
-    {
-        Debug.Log("Transitioning to Phase 4: Tyrant's Last Resort");
-        currentState = BossState.PhaseTransition;
-        isAttacking = true;
-        
-        // Play transition effects
-        PlayPhaseTransitionEffect();
-        if (audioSource != null && deathSound != null)
-            audioSource.PlayOneShot(deathSound);
-            
-        yield return new WaitForSeconds(3f);
-        
-        // Revive with second life
-        isRevived = true;
-        currentPhase = BossPhase.Phase4_LastResort;
-        isInPhase4 = true;
-        
-        // Set new health pool
-        currentHealth = maxHealthPhase4 * revivalHealthPercentage;
-        InvokeResourceEvents();
-        
-        // Update visuals (you can swap models here)
-        UpdateBossVisuals("Phase4_LastResort");
-        
-        // Reduce movement speed for final phase
-        moveSpeed *= 0.7f;
-        
-        // Reset combat timers
-        attackTimer = 0f;
-        heavyAttackTimer = 0f;
-        
-        isAttacking = false;
-        currentState = BossState.Pursuing;
-        
-        Debug.Log("Phase 4 transition complete - Boss revived!");
-    }
-    
-    private void EnterPhase2()
-    {
-        Debug.Log("Entering Phase 2: Desperate Blade");
-        currentState = BossState.PhaseTransition;
-        isAttacking = true;
-        
-        // Play transition effects
-        PlayPhaseTransitionEffect();
-        if (audioSource != null && deathSound != null)
-            audioSource.PlayOneShot(deathSound);
-            
-        StartCoroutine(PhaseTransitionCoroutine(() => {
-            currentPhase = BossPhase.Phase2_Blade;
-            isInPhase2 = true;
-            
-            // Update visuals
-            UpdateBossVisuals("Phase2_Blade");
-            
-            // Reset combat timers
-            attackTimer = 0f;
-            heavyAttackTimer = 0f;
-            
-            isAttacking = false;
-            currentState = BossState.Pursuing;
-            
-            Debug.Log("Phase 2 transition complete");
-        }, 2f));
-    }
-    
-    private void EnterPhase3()
-    {
-        Debug.Log("Entering Phase 3: Abyssal Samurai");
-        currentState = BossState.PhaseTransition;
-        isAttacking = true;
-        
-        // Play transition effects
-        PlayPhaseTransitionEffect();
-        if (audioSource != null && deathSound != null)
-            audioSource.PlayOneShot(deathSound);
-            
-        StartCoroutine(PhaseTransitionCoroutine(() => {
-            currentPhase = BossPhase.Phase3_Samurai;
-            isInPhase3 = true;
-            
-            // Update visuals
-            UpdateBossVisuals("Phase3_Samurai");
-            
-            // Increase movement speed for samurai phase
-            moveSpeed *= 1.5f;
-            
-            // Reset combat timers
-            attackTimer = 0f;
-            heavyAttackTimer = 0f;
-            
-            isAttacking = false;
-            currentState = BossState.Pursuing;
-            
-            Debug.Log("Phase 3 transition complete");
-        }, 2f));
-    }
-    
-    IEnumerator PhaseTransitionCoroutine(System.Action onComplete, float delay)
-    {
-        yield return new WaitForSeconds(delay);
-        onComplete?.Invoke();
-    }
-    
-    private void PlayPhaseTransitionEffect()
-    {
-        // Spawn phase transition effect
-        if (phaseEffects != null && phaseEffects.Length > 0)
-        {
-            int effectIndex = Mathf.Clamp((int)currentPhase, 0, phaseEffects.Length - 1);
-            if (phaseEffects[effectIndex] != null)
-            {
-                Instantiate(phaseEffects[effectIndex], transform.position, Quaternion.identity);
-            }
-        }
-    }
-    
-    void UpdateBossVisuals(string phaseName)
-    {
-        // You can implement model swapping here
-        // For now, just log the phase change
-        Debug.Log("Boss visuals updated to: " + phaseName);
-        
-        // Example: Swap models
-        // foreach (Transform child in transform)
-        // {
-        //     if (child.name.Contains(phaseName))
-        //         child.gameObject.SetActive(true);
-        //     else
-        //         child.gameObject.SetActive(false);
-        // }
-    }
-    
-    private void HandleIdle()
-    {
-        // Idle behavior
-        if (animator != null)
-            animator.SetFloat("Speed", 0f);
-    }
-    
-    private void HandleAttack()
-    {
-        // Basic attack handling
-        if (attackTimer <= 0 && !isAttacking)
-        {
-            StartCoroutine(MeleeAttack());
-        }
-    }
-    
-    private void HandleSpecialAbility()
-    {
-        // Special ability handling
-        // This will call the appropriate phase-specific abilities
-    }
-    
-    // Phase 1 Attack Methods (Grand Mage)
-    void PerformFireballBarrage()
-    {
-        if (projectileTimer > 0) return;
-        
-        currentState = BossState.SpecialAbility;
-        StartCoroutine(FireballBarrageAttack());
-    }
-    
-    IEnumerator FireballBarrageAttack()
-    {
-        isAttacking = true;
-        
-        // Create multiple fireballs in spread
-        for (int i = 0; i < projectileCount; i++)
-        {
-            float spreadAngle = -projectileSpread + (projectileSpread * 2f * i / (projectileCount - 1));
-            Vector3 spreadDirection = Quaternion.Euler(0, spreadAngle, 0) * transform.forward;
-            
-            if (projectilePrefab != null && projectileSpawnPoint != null)
-            {
-                GameObject fireball = Instantiate(projectilePrefab, projectileSpawnPoint.position, Quaternion.LookRotation(spreadDirection));
-                Projectile projectile = fireball.GetComponent<Projectile>();
-                if (projectile != null)
-                {
-                    projectile.damage = meleeDamage;
-                    projectile.owner = this;
-                }
-            }
-            
-            yield return new WaitForSeconds(0.1f);
-        }
-        
-        projectileTimer = projectileCooldown;
-        isAttacking = false;
-        currentState = BossState.Pursuing;
-    }
-    
-    void PerformAbyssalOrb()
-    {
-        if (projectileTimer > 0) return;
-        
-        currentState = BossState.SpecialAbility;
-        StartCoroutine(AbyssalOrbAttack());
-    }
-    
-    IEnumerator AbyssalOrbAttack()
-    {
-        isAttacking = true;
-        
-        // Charge up
-        if (animator != null)
-            animator.SetTrigger("Charge");
-            
-        yield return new WaitForSeconds(1f);
-        
-        // Fire slow tracking orb
-        if (projectilePrefab != null && projectileSpawnPoint != null)
-        {
-            GameObject orb = Instantiate(projectilePrefab, projectileSpawnPoint.position, Quaternion.identity);
-            Projectile projectile = orb.GetComponent<Projectile>();
-            if (projectile != null)
-            {
-                projectile.damage = heavyDamage;
-                projectile.owner = this;
-                // Make it track player (you'd need to modify Projectile class for tracking)
-            }
-        }
-        
-        projectileTimer = projectileCooldown * 1.5f; // Longer cooldown for powerful attack
-        isAttacking = false;
-        currentState = BossState.Pursuing;
-    }
-    
-    void PerformTeleportEvade()
+
+    // ══════════════════════════════════════════════════════════════
+    //  STATE HANDLERS
+    // ══════════════════════════════════════════════════════════════
+    void HandleIdle()
     {
         if (player == null) return;
-        
-        float distance = Vector3.Distance(transform.position, player.position);
-        if (distance > 5f) return; // Only teleport if player is close
-        
-        currentState = BossState.SpecialAbility;
-        StartCoroutine(TeleportEvadeAttack());
+        if (Vector3.Distance(transform.position, player.position) <= detectionRange)
+            currentState = BossState.Chasing;
     }
-    
-    IEnumerator TeleportEvadeAttack()
-    {
-        isAttacking = true;
-        
-        // Teleport effect
-        PlayPhaseTransitionEffect();
-        
-        yield return new WaitForSeconds(0.3f);
-        
-        // Calculate teleport position (away from player)
-        Vector3 teleportDirection = (transform.position - player.position).normalized;
-        Vector3 teleportPosition = transform.position + teleportDirection * 8f;
-        
-        // Teleport
-        transform.position = teleportPosition;
-        
-        yield return new WaitForSeconds(0.5f);
-        
-        isAttacking = false;
-        currentState = BossState.Pursuing;
-    }
-    
-    void PerformMagicShield()
-    {
-        currentState = BossState.SpecialAbility;
-        StartCoroutine(MagicShieldDefense());
-    }
-    
-    IEnumerator MagicShieldDefense()
-    {
-        isAttacking = true;
-        
-        // Activate shield (you'd need to implement shield visual)
-        Debug.Log("Magic Shield activated - temporary invulnerability");
-        
-        // Make boss temporarily invulnerable
-        // You could set a flag here and check it in TakeDamage
-        
-        yield return new WaitForSeconds(2f);
-        
-        Debug.Log("Magic Shield deactivated");
-        isAttacking = false;
-        currentState = BossState.Pursuing;
-    }
-    
-    // Phase 2 Attack Methods (Desperate Blade)
-    void PerformMagicSwordCombo()
-    {
-        if (attackTimer > 0) return;
-        
-        currentState = BossState.Attacking;
-        StartCoroutine(MagicSwordComboAttack());
-    }
-    
-    IEnumerator MagicSwordComboAttack()
-    {
-        isAttacking = true;
-        attackTimer = attackCooldown;
-        
-        // 3-hit combo with magical blade
-        for (int i = 0; i < 3; i++)
-        {
-            if (animator != null)
-                animator.SetTrigger("Attack" + (i + 1));
-                
-            yield return new WaitForSeconds(0.3f);
-            
-            // Deal damage for each hit
-            DealMeleeDamage(meleeDamage * (i == 1 ? 1.2f : 1f)); // Second hit is stronger
-        }
-        
-        yield return new WaitForSeconds(0.5f);
-        
-        isAttacking = false;
-        currentState = BossState.Pursuing;
-    }
-    
-    void PerformArcaneWave()
-    {
-        if (heavyAttackTimer > 0) return;
-        
-        currentState = BossState.SpecialAbility;
-        StartCoroutine(ArcaneWaveAttack());
-    }
-    
-    IEnumerator ArcaneWaveAttack()
-    {
-        isAttacking = true;
-        heavyAttackTimer = heavyAttackCooldown;
-        
-        // Charge up
-        if (animator != null)
-            animator.SetTrigger("Charge");
-            
-        yield return new WaitForSeconds(0.8f);
-        
-        // Create ground wave
-        if (groundSlamPrefab != null)
-        {
-            Vector3 wavePosition = transform.position + transform.forward * 2f;
-            GameObject wave = Instantiate(groundSlamPrefab, wavePosition, Quaternion.identity);
-            
-            // Wave moves forward (you'd need to implement wave movement script)
-            Destroy(wave, 3f);
-        }
-        
-        // Deal damage in arc
-        Collider[] hitColliders = Physics.OverlapSphere(transform.position + transform.forward * 3f, 4f);
-        foreach (var hitCollider in hitColliders)
-        {
-            if (hitCollider.CompareTag("Player"))
-            {
-                Entity playerEntity = hitCollider.GetComponent<Entity>();
-                if (playerEntity != null)
-                {
-                    playerEntity.TakeDamage(meleeDamage * 1.5f, this);
-                }
-            }
-        }
-        
-        yield return new WaitForSeconds(1f);
-        
-        isAttacking = false;
-        currentState = BossState.Pursuing;
-    }
-    
-    void PerformLeapingStrike()
-    {
-        if (player == null) return;
-        
-        float distance = Vector3.Distance(transform.position, player.position);
-        if (distance > 8f) return; // Only leap if at medium range
-        
-        if (heavyAttackTimer > 0) return;
-        
-        currentState = BossState.SpecialAbility;
-        StartCoroutine(LeapingStrikeAttack());
-    }
-    
-    IEnumerator LeapingStrikeAttack()
-    {
-        isAttacking = true;
-        heavyAttackTimer = heavyAttackCooldown;
-        
-        // Jump towards player
-        Vector3 jumpTarget = player.position;
-        Vector3 jumpDirection = (jumpTarget - transform.position).normalized;
-        jumpDirection.y = 0;
-        
-        // Perform leap
-        float leapDuration = 0.6f;
-        float leapHeight = 3f;
-        Vector3 startPos = transform.position;
-        Vector3 endPos = jumpTarget;
-        
-        for (float t = 0; t < leapDuration; t += Time.deltaTime)
-        {
-            // Arc trajectory
-            float height = Mathf.Sin(t / leapDuration * Mathf.PI) * leapHeight;
-            Vector3 currentPos = Vector3.Lerp(startPos, endPos, t / leapDuration);
-            currentPos.y = Mathf.Max(startPos.y, endPos.y) + height;
-            
-            transform.position = currentPos;
-            transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(jumpDirection), rotationSpeed * Time.deltaTime);
-            
-            yield return null;
-        }
-        
-        // Overhead slam impact
-        if (animator != null)
-            animator.SetTrigger("Slam");
-            
-        // Create shockwave
-        Collider[] hitColliders = Physics.OverlapSphere(transform.position, 5f);
-        foreach (var hitCollider in hitColliders)
-        {
-            if (hitCollider.CompareTag("Player"))
-            {
-                Entity playerEntity = hitCollider.GetComponent<Entity>();
-                if (playerEntity != null)
-                {
-                    playerEntity.TakeDamage(heavyDamage * 1.8f, this); // High damage
-                }
-            }
-        }
-        
-        yield return new WaitForSeconds(0.8f);
-        
-        isAttacking = false;
-        currentState = BossState.Pursuing;
-    }
-    
-    void PerformEnchantedParry()
-    {
-        // This would require player attack detection
-        // For now, implement as a timed counter-attack
-        if (heavyAttackTimer > 0) return;
-        
-        currentState = BossState.SpecialAbility;
-        StartCoroutine(EnchantedParryCounter());
-    }
-    
-    IEnumerator EnchantedParryCounter()
-    {
-        isAttacking = true;
-        heavyAttackTimer = heavyAttackCooldown;
-        
-        // Parry stance (short window)
-        Debug.Log("Enchanted Parry - counter window open");
-        
-        yield return new WaitForSeconds(0.3f);
-        
-        // If player attacks during this window, counter (you'd need player attack detection)
-        // For now, just do a powerful counter-attack
-        
-        if (animator != null)
-            animator.SetTrigger("Counter");
-            
-        yield return new WaitForSeconds(0.5f);
-        
-        // Deal massive counter damage
-        DealMeleeDamage(heavyDamage * 2f); // Very high damage on successful parry
-        
-        yield return new WaitForSeconds(0.5f);
-        
-        isAttacking = false;
-        currentState = BossState.Pursuing;
-    }
-    
-    void DealMeleeDamage(float damage)
-    {
-        Collider[] hitColliders = Physics.OverlapSphere(transform.position + transform.forward * attackRange, attackRange);
-        foreach (var hitCollider in hitColliders)
-        {
-            if (hitCollider.CompareTag("Player"))
-            {
-                Entity playerEntity = hitCollider.GetComponent<Entity>();
-                if (playerEntity != null)
-                {
-                    playerEntity.TakeDamage(damage, this);
-                }
-            }
-        }
-    }
-    
-    private void CheckForPlayer()
-    {
-        if (player == null) return;
-        
-        float distance = Vector3.Distance(transform.position, player.position);
-        
-        if (distance <= detectionRange)
-        {
-            currentState = BossState.Pursuing;
-            if (animator != null)
-                animator.SetTrigger("Alert");
-        }
-    }
-    
-    private void PursuePlayer()
+
+    void HandleChasing()
     {
         if (player == null || isAttacking) return;
-        
-        float distance = Vector3.Distance(transform.position, player.position);
-        
-        // Move towards player with obstacle avoidance
-        if (distance > stopDistance)
+        float dist = Vector3.Distance(transform.position, player.position);
+        FacePlayer();
+
+        // Player too close → teleport away or evade
+        if (dist < closeRange)
         {
-            MoveTowardsPlayer();
+            if (teleportCooldownTimer <= 0f && Random.value < 0.4f)
+            { StartCoroutine(DoTeleport()); return; }
+            if (evadeCooldownTimer <= 0f && Random.value < evadeChance)
+            { StartCoroutine(DoEvade()); return; }
+        }
+
+        // In preferred range → can attack if cooldown ready
+        if (dist <= preferredRange && dist >= closeRange && attackCooldownTimer <= 0f)
+        {
+            ChooseAttack(dist);
+            return;
+        }
+
+        // Outside preferred range, but in attack range → ranged attack occasionally
+        if (dist > preferredRange && dist <= attackRange && attackCooldownTimer <= 0f)
+        {
+            if (Random.value < 0.5f)
+            {
+                ChooseAttack(dist);
+                return;
+            }
+        }
+
+        // ── MOVEMENT — boss should always be visibly moving ──
+        SetAgentEnabled(true);
+        if (agent == null || !agent.enabled || !agent.isOnNavMesh) return;
+
+        if (dist > preferredRange)
+        {
+            // Run toward player when far
+            agent.speed = dist > attackRange ? runSpeed : walkSpeed;
+            agent.SetDestination(player.position);
+        }
+        else if (dist >= closeRange && dist <= preferredRange)
+        {
+            // Circle/strafe around the player while waiting for cooldown
+            agent.speed = walkSpeed * 0.8f;
+            Vector3 toPlayer = (player.position - transform.position).normalized;
+            Vector3 strafeDir = Vector3.Cross(Vector3.up, toPlayer);
+            // Swap strafe direction every ~3 seconds
+            if (Mathf.Sin(Time.time * 0.7f) > 0f) strafeDir = -strafeDir;
+            Vector3 strafeTarget = transform.position + strafeDir * 4f + toPlayer * 0.5f;
+            agent.SetDestination(strafeTarget);
         }
         else
         {
-            // Look at player when close enough
-            Vector3 direction = (player.position - transform.position).normalized;
-            direction.y = 0;
-            transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(direction), rotationSpeed * Time.deltaTime);
+            // Too close — back away
+            agent.speed = walkSpeed;
+            Vector3 awayDir = (transform.position - player.position).normalized;
+            agent.SetDestination(transform.position + awayDir * 4f);
         }
     }
-    
-    void MoveTowardsPlayer()
+
+    // ══════════════════════════════════════════════════════════════
+    //  ATTACK CHOOSER — unpredictable selection
+    // ══════════════════════════════════════════════════════════════
+    void ChooseAttack(float dist)
     {
-        Vector3 direction = (player.position - transform.position).normalized;
-        direction.y = 0f;
-        
-        // Apply obstacle avoidance
-        direction = GetAvoidanceDirection(direction);
-        
-        if (direction != Vector3.zero)
+        // Weight categories based on distance
+        float rangedW = Mathf.Clamp01((dist - closeRange) / (attackRange - closeRange));
+        float comboW  = 1f - rangedW;
+        float skillW  = 0.2f; // skills always have a chance
+        float total = rangedW + comboW + skillW;
+
+        float roll = Random.value * total;
+
+        if (roll < rangedW)
         {
-            // Look at movement direction
-            transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(direction), rotationSpeed * Time.deltaTime);
-            
-            // Move
-            Vector3 moveDirection = direction * moveSpeed;
-            controller.Move(moveDirection * Time.deltaTime);
+            int idx = PickRandom(rangedAttacks.Count);
+            StartCoroutine(DoRangedAttack(rangedAttacks[idx]));
         }
-    }
-    
-    Vector3 GetAvoidanceDirection(Vector3 desiredDirection)
-    {
-        // Check for obstacles in desired direction
-        Vector3 rayOrigin = transform.position + Vector3.up * 0.5f;
-        Vector3 rayDirection = desiredDirection.normalized;
-        
-        if (Physics.Raycast(rayOrigin, rayDirection, obstacleCheckDistance, obstacleLayer))
+        else if (roll < rangedW + comboW)
         {
-            // Obstacle detected, try to avoid it
-            Vector3 leftDirection = Quaternion.Euler(0, -avoidanceAngle, 0) * rayDirection;
-            Vector3 rightDirection = Quaternion.Euler(0, avoidanceAngle, 0) * rayDirection;
-            
-            // Check which side is clearer
-            bool leftClear = !Physics.Raycast(rayOrigin, leftDirection, obstacleCheckDistance, obstacleLayer);
-            bool rightClear = !Physics.Raycast(rayOrigin, rightDirection, obstacleCheckDistance, obstacleLayer);
-            
-            if (leftClear && !rightClear)
-                return leftDirection;
-            else if (rightClear && !leftClear)
-                return rightDirection;
-            else if (leftClear && rightClear)
-                return (leftDirection + rightDirection).normalized;
+            int idx = PickRandom(comboAttacks.Count);
+            StartCoroutine(DoComboAttack(comboAttacks[idx]));
+        }
+        else
+        {
+            int idx = PickRandom(skillAttacks.Count);
+            AttackEntry skill = skillAttacks[idx];
+            if (skill.type == AttackType.Teleport)
+                StartCoroutine(DoTeleport());
             else
-            {
-                // Both sides blocked, try bigger avoidance
-                Vector3 bigLeftDirection = Quaternion.Euler(0, -avoidanceAngle * 2, 0) * rayDirection;
-                Vector3 bigRightDirection = Quaternion.Euler(0, avoidanceAngle * 2, 0) * rayDirection;
-                
-                if (!Physics.Raycast(rayOrigin, bigLeftDirection, obstacleCheckDistance, obstacleLayer))
-                    return bigLeftDirection;
-                else if (!Physics.Raycast(rayOrigin, bigRightDirection, obstacleCheckDistance, obstacleLayer))
-                    return bigRightDirection;
-            }
-        }
-        
-        return desiredDirection;
-    }
-    
-    private void HandleCombat()
-    {
-        if (player == null) return;
-        
-        float distance = Vector3.Distance(transform.position, player.position);
-        
-        // Look at player
-        Vector3 direction = (player.position - transform.position).normalized;
-        direction.y = 0;
-        transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(direction), rotationSpeed * Time.deltaTime);
-        
-        // Phase-specific combat logic
-        switch (currentPhase)
-        {
-            case BossPhase.Phase1_Mage:
-                HandlePhase1Combat(distance);
-                break;
-            case BossPhase.Phase2_Blade:
-                HandlePhase2Combat(distance);
-                break;
-            case BossPhase.Phase3_Samurai:
-                HandlePhase3Combat(distance);
-                break;
-            case BossPhase.Phase4_LastResort:
-                HandlePhase4Combat(distance);
-                break;
+                StartCoroutine(DoSkillAttack(skill));
         }
     }
-    
-    void HandlePhase1Combat(float distance)
+
+    int PickRandom(int count)
     {
-        // Grand Mage - keep distance, use ranged attacks
-        if (distance > attackRange * 1.5f && projectileTimer <= 0)
+        // Avoid repeating the same attack twice in a row
+        int idx = Random.Range(0, count);
+        if (idx == lastAttackIndex && count > 1)
+            idx = (idx + 1) % count;
+        lastAttackIndex = idx;
+        return idx;
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    //  ATTACK COROUTINES
+    // ══════════════════════════════════════════════════════════════
+
+    // ── Single ranged cast (Attack01–06) ──
+    IEnumerator DoRangedAttack(AttackEntry atk)
+    {
+        BeginAttack();
+        useRootMotion = true;
+        float dmg = projectileDamage * atk.dmgMult;
+        SetPendingDamage(dmg, atk.range, false);
+        animator.Play(atk.clips[0], 0, 0f);
+        PlayAttackSound();
+        yield return new WaitForSeconds(atk.duration * 0.55f);
+        // Fire a projectile if prefab exists, otherwise fall back to instant damage
+        if (projectilePrefab != null && player != null)
+            FireProjectile();
+        else
+            DealDamageInFront(dmg, atk.range);
+        yield return new WaitForSeconds(atk.duration * 0.45f);
+        EndAttack();
+    }
+
+    // ── Multi-hit combos (Combo01–04) ──
+    IEnumerator DoComboAttack(AttackEntry atk)
+    {
+        BeginAttack();
+        useRootMotion = true;
+        float perClip = atk.duration / atk.clips.Length;
+        foreach (string clip in atk.clips)
         {
-            // Use fireball barrage at range
-            if (Random.value < 0.6f)
-                PerformFireballBarrage();
+            FacePlayer();
+            float dmg = comboDamage * atk.dmgMult;
+            SetPendingDamage(dmg, atk.range, atk.isAOE);
+            animator.Play(clip, 0, 0f);
+            PlayAttackSound();
+            // Deal damage at the midpoint of each hit
+            yield return new WaitForSeconds(perClip * 0.5f);
+            // Fire projectile for visual feedback if prefab exists
+            if (projectilePrefab != null && player != null && !atk.isAOE)
+                FireProjectile();
+            if (atk.isAOE) DealDamageAround(dmg, atk.range);
+            else DealDamageInFront(dmg, atk.range);
+            yield return new WaitForSeconds(perClip * 0.5f);
+        }
+        EndAttack();
+    }
+
+    // ── Big skill cast (Skill01–07) ──
+    IEnumerator DoSkillAttack(AttackEntry atk)
+    {
+        BeginAttack();
+        useRootMotion = true;
+        float dmg = skillDamage * atk.dmgMult;
+        SetPendingDamage(dmg, atk.range, atk.isAOE);
+        animator.Play(atk.clips[0], 0, 0f);
+        PlayAttackSound();
+        yield return new WaitForSeconds(atk.duration * 0.5f);
+        // Fire projectile for visual feedback if prefab exists
+        if (projectilePrefab != null && player != null && !atk.isAOE)
+            FireProjectile();
+        if (atk.isAOE) DealDamageAround(dmg, atk.range);
+        else DealDamageInFront(dmg, atk.range);
+        // Big attack — shake the screen for impact
+        ShakePlayerCamera(0.2f, 0.25f);
+        yield return new WaitForSeconds(atk.duration * 0.5f);
+        EndAttack();
+    }
+
+    // ── Teleport (Skill04) — warp away, stay grounded ──
+    IEnumerator DoTeleport()
+    {
+        BeginAttack();
+        if (teleportVFX != null) Instantiate(teleportVFX, transform.position, Quaternion.identity);
+
+        // Don't break lock-on during teleport - user wants lock-on to persist
+        // BreakLockOn();
+
+        animator.Play("Frank_RPG_Mage_Skill03", 0, 0f);
+        // Let the teleport windup animation play before warping
+        yield return new WaitForSeconds(1.2f);
+
+        Vector3 awayDir = (transform.position - player.position).normalized;
+        awayDir.y = 0f;
+        Vector3 target = transform.position + awayDir * teleportDistance;
+
+        // Only use NavMesh if agent is valid and enabled
+        if (agent != null && agent.enabled && agent.isOnNavMesh)
+        {
+            NavMeshHit hit;
+            if (NavMesh.SamplePosition(target, out hit, teleportDistance, NavMesh.AllAreas))
+                target = hit.position;
             else
-                PerformAbyssalOrb();
+                target.y = transform.position.y;
+
+            agent.Warp(target);
+            GroundOnNavMesh();
         }
-        else if (distance <= 3f && Random.value < 0.2f)
+        else
         {
-            // Teleport evade if player gets too close
-            PerformTeleportEvade();
+            // Direct teleport without NavMesh
+            transform.position = target;
         }
-        else if (Random.value < 0.1f)
-        {
-            // Magic shield defensively
-            PerformMagicShield();
-        }
-    }
-    
-    void HandlePhase2Combat(float distance)
-    {
-        // Desperate Blade - hybrid melee-magic, more aggressive
-        if (distance <= attackRange && !isAttacking)
-        {
-            if (Random.value < 0.7f)
-                PerformMagicSwordCombo(); // Primary attack
-            else if (Random.value < 0.4f)
-                PerformArcaneWave(); // Mid-range attack
-            else
-                PerformLeapingStrike(); // Gap closer
-        }
-        else if (Random.value < 0.15f)
-        {
-            PerformEnchantedParry(); // Defensive counter
-        }
-    }
-    
-    // Phase 3 Attack Methods (Abyssal Samurai)
-    void PerformShadowDashCombo()
-    {
-        if (attackTimer > 0) return;
-        
-        currentState = BossState.Attacking;
-        StartCoroutine(ShadowDashComboAttack());
-    }
-    
-    IEnumerator ShadowDashComboAttack()
-    {
-        isAttacking = true;
-        attackTimer = attackCooldown * 0.7f; // Faster attacks in samurai phase
-        
-        // Series of rapid dashes with sword slashes
-        for (int i = 0; i < 4; i++)
-        {
-            // Dash towards player
-            Vector3 dashDirection = (player.position - transform.position).normalized;
-            Vector3 dashTarget = transform.position + dashDirection * 2f;
-            
-            // Create shadow ink trail
-            if (groundSlamPrefab != null)
-            {
-                GameObject ink = Instantiate(groundSlamPrefab, transform.position, Quaternion.identity);
-                Destroy(ink, 2f);
-            }
-            
-            // Fast dash
-            float dashDuration = 0.15f;
-            Vector3 startPos = transform.position;
-            Vector3 endPos = dashTarget;
-            
-            for (float t = 0; t < dashDuration; t += Time.deltaTime)
-            {
-                transform.position = Vector3.Lerp(startPos, endPos, t / dashDuration);
-                transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(dashDirection), rotationSpeed * Time.deltaTime * 3f);
-                yield return null;
-            }
-            
-            // Quick sword slash
-            if (animator != null)
-                animator.SetTrigger("Attack");
-                
-            DealMeleeDamage(meleeDamage * 0.8f); // Moderate damage but fast
-            
-            yield return new WaitForSeconds(0.1f);
-        }
-        
-        yield return new WaitForSeconds(0.3f);
-        
-        isAttacking = false;
-        currentState = BossState.Pursuing;
-    }
-    
-    void PerformMagicIaijutsu()
-    {
-        if (heavyAttackTimer > 0) return;
-        
-        currentState = BossState.SpecialAbility;
-        StartCoroutine(MagicIaijutsuAttack());
-    }
-    
-    IEnumerator MagicIaijutsuAttack()
-    {
-        isAttacking = true;
-        heavyAttackTimer = heavyAttackCooldown * 0.8f;
-        
-        // Very fast sword draw with massive damage
-        if (animator != null)
-            animator.SetTrigger("Iaijutsu");
-            
-        yield return new WaitForSeconds(0.2f); // Very short wind-up
-        
-        // Instant massive damage
-        DealMeleeDamage(heavyDamage * 2.5f); // Very high damage
-        
-        // Visual effect for iaijutsu
-        if (groundSlamPrefab != null)
-        {
-            GameObject effect = Instantiate(groundSlamPrefab, transform.position + transform.forward * 2f, Quaternion.identity);
-            Destroy(effect, 1f);
-        }
-        
-        yield return new WaitForSeconds(0.4f);
-        
-        isAttacking = false;
-        currentState = BossState.Pursuing;
-    }
-    
-    void PerformAbyssalClone()
-    {
-        if (projectileTimer > 0) return;
-        
-        currentState = BossState.SpecialAbility;
-        StartCoroutine(AbyssalCloneAttack());
-    }
-    
-    IEnumerator AbyssalCloneAttack()
-    {
-        isAttacking = true;
-        projectileTimer = projectileCooldown * 1.2f;
-        
-        // Summon 1-2 shadowy clones
-        int cloneCount = Random.Range(1, 3);
-        for (int i = 0; i < cloneCount; i++)
-        {
-            Vector3 spawnOffset = Quaternion.Euler(0, 120f * i, 0) * Vector3.forward * 2f;
-            Vector3 clonePos = transform.position + spawnOffset;
-            
-            // Create clone (you'd need a separate clone script)
-            if (groundSlamPrefab != null)
-            {
-                GameObject clone = Instantiate(groundSlamPrefab, clonePos, Quaternion.identity);
-                
-                // Make clone attack after delay
-                StartCoroutine(CloneAttack(clone, player.position));
-                Destroy(clone, 3f);
-            }
-        }
-        
+
+        if (teleportVFX != null) Instantiate(teleportVFX, transform.position, Quaternion.identity);
         yield return new WaitForSeconds(0.5f);
-        
-        isAttacking = false;
-        currentState = BossState.Pursuing;
+
+        teleportCooldownTimer = teleportCooldown;
+        EndAttack(0.5f);
     }
-    
-    IEnumerator CloneAttack(GameObject clone, Vector3 targetPos)
+
+    // ── Evade (directional dodge) ──
+    IEnumerator DoEvade()
     {
+        currentState = BossState.Evading;
+        isAttacking = true;
+        SetAgentEnabled(false);
+
+        // Pick contextual evade: if player is in front, evade back; else random
+        string anim;
+        Vector3 toPlayer = (player.position - transform.position).normalized;
+        float dot = Vector3.Dot(transform.forward, toPlayer);
+        if (dot > 0.5f) anim = evadeAnims[0]; // Evade_B
+        else anim = evadeAnims[Random.Range(0, evadeAnims.Length)];
+
+        animator.CrossFade(anim, 0.1f);
         yield return new WaitForSeconds(0.8f);
-        
-        // Clone attacks towards player
-        Vector3 direction = (targetPos - clone.transform.position).normalized;
-        clone.transform.rotation = Quaternion.LookRotation(direction);
-        
-        // Deal damage
-        DealMeleeDamageFromPosition(clone.transform.position, meleeDamage * 0.6f);
+
+        evadeCooldownTimer = evadeCooldown;
+        isAttacking = false;
+        SetAgentEnabled(true);
+        currentState = BossState.Chasing;
     }
-    
-    void PerformShadowInkBurst()
-    {
-        if (player == null) return;
-        
-        float distance = Vector3.Distance(transform.position, player.position);
-        if (distance > 4f) return; // Only use if player is close
-        
-        if (heavyAttackTimer > 0) return;
-        
-        currentState = BossState.SpecialAbility;
-        StartCoroutine(ShadowInkBurstAttack());
-    }
-    
-    IEnumerator ShadowInkBurstAttack()
+
+    // ══════════════════════════════════════════════════════════════
+    //  ATTACK HELPERS
+    // ══════════════════════════════════════════════════════════════
+    void BeginAttack()
     {
         isAttacking = true;
-        heavyAttackTimer = heavyAttackCooldown;
-        
-        // Jump back and create ink burst
-        Vector3 jumpBack = transform.position - transform.forward * 3f;
-        
-        // Create ink burst effect
-        if (groundSlamPrefab != null)
-        {
-            for (int i = 0; i < 8; i++)
-            {
-                Vector3 inkPos = transform.position + Quaternion.Euler(0, 45f * i, 0) * Vector3.forward * 2f;
-                GameObject ink = Instantiate(groundSlamPrefab, inkPos, Quaternion.identity);
-                Destroy(ink, 1.5f);
-            }
-        }
-        
-        // Jump back
-        Vector3 startPos = transform.position;
-        for (float t = 0; t < 0.3f; t += Time.deltaTime)
-        {
-            transform.position = Vector3.Lerp(startPos, jumpBack, t / 0.3f);
-            yield return null;
-        }
-        
-        // Deal area damage
-        DealMeleeDamage(heavyDamage * 0.7f); // Moderate area damage
-        
-        yield return new WaitForSeconds(0.5f);
-        
-        isAttacking = false;
-        currentState = BossState.Pursuing;
-    }
-    
-    void DealMeleeDamageFromPosition(Vector3 damageOrigin, float damage)
-    {
-        Collider[] hitColliders = Physics.OverlapSphere(damageOrigin, attackRange);
-        foreach (var hitCollider in hitColliders)
-        {
-            if (hitCollider.CompareTag("Player"))
-            {
-                Entity playerEntity = hitCollider.GetComponent<Entity>();
-                if (playerEntity != null)
-                {
-                    playerEntity.TakeDamage(damage, this);
-                }
-            }
-        }
-    }
-    
-    // Phase 3 and 4 combat handlers
-    void HandlePhase3Combat(float distance)
-    {
-        // Abyssal Samurai - lightning fast, aggressive, shadow-based
-        if (distance <= attackRange && !isAttacking)
-        {
-            if (Random.value < 0.6f)
-                PerformShadowDashCombo(); // Primary fast attack
-            else if (Random.value < 0.3f)
-                PerformMagicIaijutsu(); // Punishing fast attack
-            else if (Random.value < 0.15f)
-                PerformAbyssalClone(); // Utility/pressure attack
-            else
-                PerformShadowInkBurst(); // Area control
-        }
-        else if (Random.value < 0.1f)
-        {
-            // More aggressive movement
-            moveSpeed = moveSpeed * 1.2f; // Temporary speed boost
-        }
-    }
-    
-    // Phase 4 Attack Methods (Tyrant's Last Resort)
-    void PerformCrushingOverheadSlam()
-    {
-        if (heavyAttackTimer > 0) return;
-        
-        currentState = BossState.SpecialAbility;
-        StartCoroutine(CrushingOverheadSlamAttack());
-    }
-    
-    IEnumerator CrushingOverheadSlamAttack()
-    {
-        isAttacking = true;
-        heavyAttackTimer = heavyAttackCooldown * 1.5f; // Slower attacks in final phase
-        
-        // Very slow, highly telegraphed overhead swing
-        if (animator != null)
-            animator.SetTrigger("Charge"); // Long charge animation
-            
-        yield return new WaitForSeconds(1.5f); // Long wind-up time
-        
-        if (animator != null)
-            animator.SetTrigger("Slam");
-            
-        // Deal extreme damage in large area
-        Collider[] hitColliders = Physics.OverlapSphere(transform.position + transform.forward * 3f, 6f);
-        foreach (var hitCollider in hitColliders)
-        {
-            if (hitCollider.CompareTag("Player"))
-            {
-                Entity playerEntity = hitCollider.GetComponent<Entity>();
-                if (playerEntity != null)
-                {
-                    playerEntity.TakeDamage(heavyDamage * 3f, this); // Extreme damage
-                }
-            }
-        }
-        
-        // Create large shockwave
-        if (groundSlamPrefab != null)
-        {
-            GameObject shockwave = Instantiate(groundSlamPrefab, transform.position + transform.forward * 3f, Quaternion.identity);
-            Destroy(shockwave, 2f);
-        }
-        
-        yield return new WaitForSeconds(1f);
-        
-        isAttacking = false;
-        currentState = BossState.Pursuing;
-    }
-    
-    void PerformSweepingArc()
-    {
-        if (heavyAttackTimer > 0) return;
-        
         currentState = BossState.Attacking;
-        StartCoroutine(SweepingArcAttack());
+        SetAgentEnabled(false);
+        FacePlayer();
     }
-    
-    IEnumerator SweepingArcAttack()
+
+    void EndAttack(float cooldownOverride = -1f)
     {
-        isAttacking = true;
-        heavyAttackTimer = heavyAttackCooldown * 1.3f; // Slower attacks
-        
-        // Wide, slow horizontal swing
-        if (animator != null)
-            animator.SetTrigger("Sweep");
-            
-        yield return new WaitForSeconds(1f); // Slow wind-up
-        
-        // Deal high damage in wide arc
-        Vector3 arcCenter = transform.position + transform.forward * 2f;
-        Quaternion boxRotation = Quaternion.LookRotation(transform.forward);
-        Vector3 boxSize = new Vector3(8f, 2f, 4f);
-        Collider[] hitColliders = Physics.OverlapBox(arcCenter - Vector3.right * 4f, boxSize, boxRotation);
-        foreach (var hitCollider in hitColliders)
-        {
-            if (hitCollider.CompareTag("Player"))
-            {
-                Entity playerEntity = hitCollider.GetComponent<Entity>();
-                if (playerEntity != null)
-                {
-                    playerEntity.TakeDamage(heavyDamage * 2.2f, this); // High damage
-                    // Could knock player down here
-                }
-            }
-        }
-        
-        yield return new WaitForSeconds(0.8f);
-        
         isAttacking = false;
-        currentState = BossState.Pursuing;
+        useRootMotion = false;
+        attackCooldownTimer = cooldownOverride >= 0f
+            ? cooldownOverride
+            : Random.Range(attackCooldownMin, attackCooldownMax);
+        SetAgentEnabled(true);
+        currentState = BossState.Chasing;
     }
-    
-    void PerformAbyssalGroundPound()
-    {
-        if (heavyAttackTimer > 0) return;
-        
-        currentState = BossState.SpecialAbility;
-        StartCoroutine(AbyssalGroundPoundAttack());
-    }
-    
-    IEnumerator AbyssalGroundPoundAttack()
-    {
-        isAttacking = true;
-        heavyAttackTimer = heavyAttackCooldown * 1.8f; // Very slow attacks
-        
-        // Raise heavy sword and slam into ground
-        if (animator != null)
-            animator.SetTrigger("GroundPound");
-            
-        yield return new WaitForSeconds(1.2f); // Very slow wind-up
-        
-        // Create multiple Shadow Ink geysers in pattern
-        Vector3 poundPosition = transform.position + transform.forward * 2f;
-        
-        // Create 5 ink geysers in cross pattern
-        for (int i = 0; i < 5; i++)
-        {
-            Vector3 geyserOffset;
-            if (i == 0) geyserOffset = Vector3.forward * 3f + Vector3.right * 3f;
-            else if (i == 1) geyserOffset = Vector3.forward * 3f - Vector3.right * 3f;
-            else if (i == 2) geyserOffset = Vector3.forward * 6f;
-            else if (i == 3) geyserOffset = Vector3.right * 6f;
-            else geyserOffset = -Vector3.forward * 3f;
-            
-            Vector3 geyserPos = poundPosition + geyserOffset;
-            
-            if (groundSlamPrefab != null)
-            {
-                GameObject geyser = Instantiate(groundSlamPrefab, geyserPos, Quaternion.identity);
-                Destroy(geyser, 2.5f);
-            }
-        }
-        
-        // Deal area damage
-        Collider[] hitColliders = Physics.OverlapSphere(poundPosition, 8f);
-        foreach (var hitCollider in hitColliders)
-        {
-            if (hitCollider.CompareTag("Player"))
-            {
-                Entity playerEntity = hitCollider.GetComponent<Entity>();
-                if (playerEntity != null)
-                {
-                    playerEntity.TakeDamage(heavyDamage * 2.5f, this); // High damage
-                }
-            }
-        }
-        
-        yield return new WaitForSeconds(1.5f);
-        
-        isAttacking = false;
-        currentState = BossState.Pursuing;
-    }
-    
-    void PerformDesperateRoar()
+
+    void FacePlayer()
     {
         if (player == null) return;
-        
-        float distance = Vector3.Distance(transform.position, player.position);
-        if (distance > 5f) return; // Only use if player is close
-        
-        if (heavyAttackTimer > 0) return;
-        
-        currentState = BossState.SpecialAbility;
-        StartCoroutine(DesperateRoarAttack());
-    }
-    
-    IEnumerator DesperateRoarAttack()
-    {
-        isAttacking = true;
-        heavyAttackTimer = heavyAttackCooldown;
-        
-        // Briefly stun player
-        if (animator != null)
-            animator.SetTrigger("Roar");
-            
-        // Stun nearby player (you'd need to implement player stun system)
-        Collider[] hitColliders = Physics.OverlapSphere(transform.position, 6f);
-        foreach (var hitCollider in hitColliders)
+        Vector3 dir = player.position - transform.position;
+        dir.y = 0;
+        if (dir.sqrMagnitude > 0.01f)
         {
-            if (hitCollider.CompareTag("Player"))
+            Quaternion target = Quaternion.LookRotation(dir.normalized);
+            transform.rotation = Quaternion.Slerp(transform.rotation, target, rotationSpeed * Time.deltaTime);
+        }
+    }
+
+    void SetAgentEnabled(bool enabled)
+    {
+        if (agent == null || !agent.isOnNavMesh) return;
+        agent.isStopped = !enabled;
+        agent.updatePosition = enabled;
+        agent.updateRotation = enabled;
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    //  DAMAGE DEALING
+    // ══════════════════════════════════════════════════════════════
+    void SetPendingDamage(float damage, float range, bool aoe)
+    {
+        pendingDamage = damage;
+        pendingDamageRange = range;
+        pendingIsAOE = aoe;
+    }
+
+    void DealDamageInFront(float damage, float range)
+    {
+        Vector3 center = transform.position + transform.forward * (range * 0.5f);
+        foreach (Collider col in Physics.OverlapSphere(center, range))
+        {
+            if (col.CompareTag("Player"))
             {
-                // PlayerController playerController = hitCollider.GetComponent<PlayerController>();
-                // if (playerController != null)
-                // {
-                //     playerController.Stun(1f); // Stun for 1 second
-                // }
+                Entity e = col.GetComponent<Entity>();
+                if (e != null) e.TakeDamage(damage, this);
             }
         }
-        
-        yield return new WaitForSeconds(0.5f);
-        
-        // Creates opening for follow-up attack
-        isAttacking = false;
-        currentState = BossState.Pursuing;
     }
-    
-    void HandlePhase4Combat(float distance)
+
+    void DealDamageAround(float damage, float radius)
     {
-        // Tyrant's Last Resort - slow but relentless
-        if (distance <= attackRange && !isAttacking)
+        // Spawn ring effect for visual feedback (safe now with safeguard in AOERingEffect)
+        if (aoeRingMaterial != null)
         {
-            if (Random.value < 0.4f)
-                PerformCrushingOverheadSlam(); // Primary heavy attack
-            else if (Random.value < 0.3f)
-                PerformSweepingArc(); // Wide area attack
-            else if (Random.value < 0.2f)
-                PerformAbyssalGroundPound(); // Area control attack
-            else
-                PerformDesperateRoar(); // Utility setup attack
+            AOERingEffect.Spawn(transform.position, aoeRingMaterial, radius, aoeRingDuration);
         }
-        // Does not actively chase with speed, relies on massive attack range
-        // Movement is already slowed in phase transition
-    }
-    
-    private IEnumerator MeleeAttack()
-    {
-        isAttacking = true;
-        attackTimer = attackCooldown;
-        
-        if (animator != null)
-            animator.SetTrigger("MeleeAttack");
-            
-        PlaySound(attackSounds);
-        
-        yield return new WaitForSeconds(0.5f); // Wind-up time
-        
-        // Deal damage in front of boss
-        Collider[] hitColliders = Physics.OverlapSphere(transform.position + transform.forward * attackRange, attackRange);
-        foreach (var hitCollider in hitColliders)
+
+        foreach (Collider col in Physics.OverlapSphere(transform.position, radius))
         {
-            if (hitCollider.CompareTag("Player"))
+            if (col.CompareTag("Player"))
             {
-                Entity playerEntity = hitCollider.GetComponent<Entity>();
-                if (playerEntity != null)
-                {
-                    playerEntity.TakeDamage(meleeDamage, this);
-                }
+                Entity playerEntity = col.GetComponent<Entity>();
+                if (playerEntity != null) playerEntity.TakeDamage(damage, this);
             }
         }
-        
-        yield return new WaitForSeconds(0.5f); // Recovery time
-        isAttacking = false;
     }
-    
-    private IEnumerator HeavyAttack()
+
+    // ══════════════════════════════════════════════════════════════
+    //  ANIMATION EVENT CALLBACKS
+    //  Add these as Animation Events on your clips at the impact frame.
+    // ══════════════════════════════════════════════════════════════
+    public void ActivateHitbox()
     {
-        isAttacking = true;
-        heavyAttackTimer = heavyAttackCooldown;
-        
-        if (animator != null)
-            animator.SetTrigger("HeavyAttack");
-            
-        PlaySound(attackSounds);
-        
-        yield return new WaitForSeconds(0.8f); // Longer wind-up
-        
-        // Deal heavy damage in larger area
-        Collider[] hitColliders = Physics.OverlapSphere(transform.position + transform.forward * attackRange * 1.5f, attackRange * 1.5f);
-        foreach (var hitCollider in hitColliders)
-        {
-            if (hitCollider.CompareTag("Player"))
-            {
-                Entity playerEntity = hitCollider.GetComponent<Entity>();
-                if (playerEntity != null)
-                {
-                    playerEntity.TakeDamage(heavyDamage, this);
-                }
-            }
-        }
-        
-        yield return new WaitForSeconds(1f); // Longer recovery
-        isAttacking = false;
+        if (weaponHitbox != null) weaponHitbox.Activate(pendingDamage);
     }
-    
-    private IEnumerator GroundSlam()
+
+    public void DeactivateHitbox()
     {
-        isAttacking = true;
-        groundSlamTimer = groundSlamCooldown;
-        
-        if (animator != null)
-            animator.SetTrigger("GroundSlam");
-            
-        PlaySound(attackSounds);
-        
-        yield return new WaitForSeconds(1f);
-        
-        // Create ground slam effect
-        if (groundSlamPrefab != null)
-        {
-            Instantiate(groundSlamPrefab, transform.position, Quaternion.identity);
-        }
-        
-        // Deal damage in large AoE
-        Collider[] hitColliders = Physics.OverlapSphere(transform.position, 8f);
-        foreach (var hitCollider in hitColliders)
-        {
-            if (hitCollider.CompareTag("Player"))
-            {
-                Entity playerEntity = hitCollider.GetComponent<Entity>();
-                if (playerEntity != null)
-                {
-                    playerEntity.TakeDamage(heavyDamage * 0.8f, this);
-                }
-            }
-        }
-        
-        yield return new WaitForSeconds(1f);
-        isAttacking = false;
-        currentState = BossState.Pursuing;
+        if (weaponHitbox != null) weaponHitbox.Deactivate();
     }
-    
-    private IEnumerator ProjectileAttack()
+
+    public void DealPendingDamage()
     {
-        isAttacking = true;
-        projectileTimer = projectileCooldown;
-        
-        if (animator != null)
-            animator.SetTrigger("Cast");
-            
-        PlaySound(attackSounds);
-        
-        yield return new WaitForSeconds(0.5f);
-        
-        // Fire multiple projectiles
-        for (int i = 0; i < projectileCount; i++)
-        {
-            if (projectilePrefab != null && projectileSpawnPoint != null)
-            {
-                GameObject projectile = Instantiate(projectilePrefab, projectileSpawnPoint.position, projectileSpawnPoint.rotation);
-                
-                // Calculate spread
-                float angle = (i - (projectileCount - 1) / 2f) * projectileSpread;
-                Quaternion rotation = projectileSpawnPoint.rotation * Quaternion.Euler(0, angle, 0);
-                projectile.transform.rotation = rotation;
-                
-                // Set projectile damage
-                Projectile projectileScript = projectile.GetComponent<Projectile>();
-                if (projectileScript != null)
-                {
-                    projectileScript.damage = 20f;
-                }
-            }
-        }
-        
-        yield return new WaitForSeconds(0.5f);
-        isAttacking = false;
-        currentState = BossState.Pursuing;
+        if (pendingIsAOE)
+            DealDamageAround(pendingDamage, pendingDamageRange);
+        else
+            DealDamageInFront(pendingDamage, pendingDamageRange);
     }
-    
-    private void HandleStunned()
+
+    public void FireProjectile()
     {
-        // Stunned state logic
-        if (attackTimer <= 0)
+        if (projectilePrefab == null || player == null) return;
+        Vector3 spawnPos = projectileSpawnPoint != null
+            ? projectileSpawnPoint.position
+            : transform.position + transform.forward * 1f + Vector3.up * 1.5f;
+        Vector3 dir = (player.position + Vector3.up * 1f - spawnPos).normalized;
+        GameObject proj = Instantiate(projectilePrefab, spawnPos, Quaternion.LookRotation(dir));
+
+        // Give it velocity so it actually flies
+        Rigidbody rb = proj.GetComponent<Rigidbody>();
+        if (rb != null)
+            rb.linearVelocity = dir * projectileSpeed;
+
+        Projectile p = proj.GetComponent<Projectile>();
+        if (p != null) { p.damage = pendingDamage; p.owner = this; }
+
+        Destroy(proj, 10f);
+    }
+
+    public void PlayAttackSound() { PlaySound(attackSounds); }
+
+    // ══════════════════════════════════════════════════════════════
+    //  ANIMATOR
+    // ══════════════════════════════════════════════════════════════
+    void UpdateAnimatorParams()
+    {
+        if (animator == null) return;
+        float speed = agent != null && agent.enabled ? agent.velocity.magnitude : 0f;
+        animator.SetFloat("Speed", speed, 0.1f, Time.deltaTime);
+    }
+
+    void OnAnimatorMove()
+    {
+        if (animator == null) return;
+
+        // Dead — strip ALL root motion, keep grounded
+        if (currentState == BossState.Dead)
         {
-            currentState = BossState.Pursuing;
+            // Only apply horizontal root motion, lock Y to last grounded pos
+            Vector3 delta = animator.deltaPosition;
+            delta.y = 0f;
+            transform.position += delta;
+            return;
+        }
+
+        if (useRootMotion && isAttacking)
+        {
+            Vector3 delta = animator.deltaPosition;
+            delta.y = 0f;
+            transform.position += delta;
+            transform.rotation *= animator.deltaRotation;
+            if (agent != null && agent.enabled && agent.isOnNavMesh)
+                transform.position = new Vector3(transform.position.x, agent.nextPosition.y, transform.position.z);
+        }
+        else if (agent != null && agent.enabled && agent.isOnNavMesh)
+        {
+            // Let NavMeshAgent drive ALL movement
+            transform.position = agent.nextPosition;
         }
     }
-    
+
+    // ══════════════════════════════════════════════════════════════
+    //  HEALTH OVERRIDES
+    // ══════════════════════════════════════════════════════════════
+    public override void TakeDamage(float damage, Entity attacker = null)
+    {
+        if (isDead) return;
+        base.TakeDamage(damage, attacker);
+    }
+
     protected override void OnDamageTaken(float damage, Entity attacker)
     {
-        // Play hurt sound
         PlaySound(hurtSounds);
-        
-        // Flash red or other visual feedback
-        if (animator != null)
-            animator.SetTrigger("Hurt");
-            
-        // Chance to get stunned in phase 3
-        if (isInPhase3 && Random.value < 0.1f)
-        {
-            currentState = BossState.Stunned;
-            attackTimer = 1f;
-        }
+        // Play random hit reaction if not mid-attack
+        if (animator != null && !isAttacking && hitAnims != null && hitAnims.Length > 0)
+            animator.CrossFade(hitAnims[Random.Range(0, hitAnims.Length)], 0.1f);
     }
-    
+
     protected override void Die()
     {
-        base.Die();
-        
-        // Play death sound
-        if (audioSource != null && deathSound != null)
+        currentState = BossState.Dead;
+        isAttacking = false;
+        useRootMotion = false;
+        StopAllCoroutines();
+
+        // Disable agent completely so it doesn't fight with position
+        if (agent != null)
         {
-            audioSource.PlayOneShot(deathSound);
+            agent.isStopped = true;
+            agent.updatePosition = false;
+            agent.updateRotation = false;
+            agent.enabled = false;
         }
-        
-        // Play death animation
-        if (animator != null)
-            animator.SetTrigger("Death");
-            
-        // Disable components
-        if (controller != null)
-            controller.enabled = false;
-            
-        // Disable this script after a delay
-        StartCoroutine(DisableAfterDelay(3f));
-        
-        Debug.Log(bossName + " has been defeated!");
+
+        // Ground the boss firmly before playing death
+        GroundOnNavMesh();
+
+        // Random death anim
+        string deathAnim = Random.value > 0.5f ? "Frank_RPG_Mage_Die" : "Frank_RPG_Mage_Die02";
+        if (animator != null) animator.CrossFade(deathAnim, 0.15f);
+        PlaySound(deathSound);
+
+        base.Die();
+        StartCoroutine(DisableAfterDelay(5f));
+        Debug.Log($"[Boss] {bossName} defeated!");
     }
-    
-    private IEnumerator DisableAfterDelay(float delay)
+
+    IEnumerator DisableAfterDelay(float t)
     {
-        yield return new WaitForSeconds(delay);
+        yield return new WaitForSeconds(t);
         gameObject.SetActive(false);
     }
-    
-    private void PlaySound(AudioClip[] clips)
+
+    // ══════════════════════════════════════════════════════════════
+    //  UTILITY
+    // ══════════════════════════════════════════════════════════════
+    void PlaySound(AudioClip clip)
     {
-        if (audioSource != null && clips != null && clips.Length > 0)
+        if (audioSource != null && clip != null)
+            audioSource.PlayOneShot(clip);
+    }
+
+    void PlaySound(AudioClip[] clips)
+    {
+        if (audioSource == null || clips == null || clips.Length == 0) return;
+        audioSource.PlayOneShot(clips[Random.Range(0, clips.Length)]);
+    }
+
+    void ShakePlayerCamera(float magnitude, float duration)
+    {
+        var cmCam = FindAnyObjectByType<CinemachineLockOnCamera>();
+        if (cmCam != null) { cmCam.Shake(magnitude, duration); return; }
+        CameraFollow cam = Camera.main?.GetComponent<CameraFollow>();
+        if (cam != null) cam.Shake(magnitude, duration);
+    }
+
+    void GroundOnNavMesh()
+    {
+        NavMeshHit hit;
+        if (NavMesh.SamplePosition(transform.position, out hit, 10f, NavMesh.AllAreas))
         {
-            AudioClip clip = clips[Random.Range(0, clips.Length)];
-            if (clip != null)
-                audioSource.PlayOneShot(clip);
+            transform.position = hit.position;
+            if (agent != null && agent.enabled)
+                agent.Warp(hit.position);
         }
     }
-    
-    // Public methods for external triggers
-    public void ForcePhase(int phase)
+
+    void BreakLockOn()
     {
-        switch (phase)
+        if (playerLockOn == null) return;
+        // Only break if the player is locked onto THIS boss
+        if (playerLockOn.currentTarget != null)
         {
-            case 2:
-                if (!isInPhase2) EnterPhase2();
-                break;
-            case 3:
-                if (!isInPhase3) EnterPhase3();
-                break;
+            Transform lockTarget = playerLockOn.currentTarget;
+            // Check if lock target is this boss or a child of this boss (LockOnPoint)
+            if (lockTarget == transform || lockTarget.IsChildOf(transform))
+                playerLockOn.ReleaseLockOn();
         }
     }
-    
-    // Debug visualization
-    private void OnDrawGizmosSelected()
+
+    // ══════════════════════════════════════════════════════════════
+    //  DEBUG
+    // ══════════════════════════════════════════════════════════════
+    void OnDrawGizmosSelected()
     {
-        // Detection range
         Gizmos.color = Color.yellow;
         Gizmos.DrawWireSphere(transform.position, detectionRange);
-        
-        // Attack range
+        Gizmos.color = Color.cyan;
+        Gizmos.DrawWireSphere(transform.position, preferredRange);
         Gizmos.color = Color.red;
         Gizmos.DrawWireSphere(transform.position, attackRange);
-        
-        // Ground slam range
-        Gizmos.color = Color.blue;
-        Gizmos.DrawWireSphere(transform.position, 8f);
+        Gizmos.color = Color.magenta;
+        Gizmos.DrawWireSphere(transform.position, closeRange);
     }
 }

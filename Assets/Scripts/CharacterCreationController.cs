@@ -31,6 +31,7 @@ public class CharacterCreationController : MonoBehaviour
     [Header("Settings")]
     public string gameSceneName = "Fantasy";
     
+    
     // Current selections
     private Gender currentGender = Gender.Male;
     private Race currentRace = Race.Human;
@@ -77,6 +78,7 @@ public class CharacterCreationController : MonoBehaviour
         colorIndices["PrimaryColor"] = 0;
         colorIndices["SecondaryColor"] = 0;
         colorIndices["MetalColor"] = 0;
+        colorIndices["TattooColor"] = 0;
     }
     
     void SetupButtons()
@@ -176,6 +178,7 @@ public class CharacterCreationController : MonoBehaviour
         colorIndices["PrimaryColor"] = Random.Range(0, characterRandomizer.primary.Length);
         colorIndices["SecondaryColor"] = Random.Range(0, characterRandomizer.secondary.Length);
         colorIndices["MetalColor"] = Random.Range(0, characterRandomizer.metalPrimary.Length);
+        colorIndices["TattooColor"] = Random.Range(0, characterRandomizer.bodyArt.Length);
     }
     
     void ToggleGender()
@@ -314,6 +317,7 @@ public class CharacterCreationController : MonoBehaviour
             case "PrimaryColor": return characterRandomizer.primary.Length;
             case "SecondaryColor": return characterRandomizer.secondary.Length;
             case "MetalColor": return characterRandomizer.metalPrimary.Length;
+            case "TattooColor": return characterRandomizer.bodyArt.Length;
             default: return 0;
         }
     }
@@ -384,6 +388,13 @@ public class CharacterCreationController : MonoBehaviour
         {
             int index = Mathf.Clamp(colorIndices["MetalColor"], 0, characterRandomizer.metalPrimary.Length - 1);
             characterRandomizer.mat.SetColor("_Color_Metal_Primary", characterRandomizer.metalPrimary[index]);
+        }
+        
+        // Tattoo / Body Art
+        if (characterRandomizer.bodyArt.Length > 0)
+        {
+            int index = Mathf.Clamp(colorIndices["TattooColor"], 0, characterRandomizer.bodyArt.Length - 1);
+            characterRandomizer.mat.SetColor("_Color_BodyArt", characterRandomizer.bodyArt[index]);
         }
     }
     
@@ -590,6 +601,7 @@ public class CharacterCreationController : MonoBehaviour
         }
         
         PlayerPrefs.Save();
+        Debug.Log("Character saved");
         
         // DESTROY ALL CANVASES BEFORE LOADING NEW SCENE
         Canvas[] allCanvases = FindObjectsOfType<Canvas>();
@@ -598,13 +610,8 @@ public class CharacterCreationController : MonoBehaviour
             Destroy(canvas.gameObject);
         }
         
-        Debug.Log("Character saved");
-        
-        // Notify GameManager that character was created
         if (GameManager.Instance != null)
-        {
             GameManager.Instance.OnCharacterCreated();
-        }
         
         SceneManager.LoadScene(gameSceneName);
     }

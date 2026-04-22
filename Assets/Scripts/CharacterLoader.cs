@@ -10,11 +10,25 @@ public class CharacterLoader : MonoBehaviour
 {
     public CharacterRandomizer characterRandomizer;
     
-void Start()
-{
-    LoadCharacter();
-    StartCoroutine(DestroyTextForever());
-}
+    void Awake()
+    {
+        // Prevent CharacterRandomizer from running its own randomization on Start
+        if (characterRandomizer != null)
+            characterRandomizer.repeatOnPlay = false;
+    }
+    
+    void Start()
+    {
+        // Delay load by 1 frame so CharacterRandomizer finishes its own init first
+        StartCoroutine(LoadAfterFrame());
+        StartCoroutine(DestroyTextForever());
+    }
+    
+    System.Collections.IEnumerator LoadAfterFrame()
+    {
+        yield return null; // wait 1 frame
+        LoadCharacter();
+    }
 
 System.Collections.IEnumerator DestroyTextForever()
 {
@@ -93,6 +107,7 @@ System.Collections.IEnumerator DestroyTextForever()
         int primaryColorIndex = PlayerPrefs.GetInt("CharacterPrimaryColor", 0);
         int secondaryColorIndex = PlayerPrefs.GetInt("CharacterSecondaryColor", 0);
         int metalColorIndex = PlayerPrefs.GetInt("CharacterMetalColor", 0);
+        int tattooColorIndex = PlayerPrefs.GetInt("CharacterTattooColor", 0);
 
         // Clear existing objects
         if (characterRandomizer.enabledObjects.Count > 0)
@@ -182,7 +197,7 @@ System.Collections.IEnumerator DestroyTextForever()
         }
 
         // Apply colors
-        ApplyColors(skinColorStr, hairColorIndex, primaryColorIndex, secondaryColorIndex, metalColorIndex);
+        ApplyColors(skinColorStr, hairColorIndex, primaryColorIndex, secondaryColorIndex, metalColorIndex, tattooColorIndex);
 
         // ========== REMOVE SYNTY DEMO TEXT ==========
         TMP_Text[] texts = GetComponentsInChildren<TMP_Text>(true);
@@ -229,7 +244,7 @@ System.Collections.IEnumerator DestroyTextForever()
         }
     }
     
-    void ApplyColors(string skinColorStr, int hairColorIndex, int primaryColorIndex, int secondaryColorIndex, int metalColorIndex)
+    void ApplyColors(string skinColorStr, int hairColorIndex, int primaryColorIndex, int secondaryColorIndex, int metalColorIndex, int tattooColorIndex)
     {
         if (characterRandomizer.mat == null) return;
         
@@ -269,6 +284,13 @@ System.Collections.IEnumerator DestroyTextForever()
         {
             int clampedIndex = Mathf.Clamp(metalColorIndex, 0, characterRandomizer.metalPrimary.Length - 1);
             characterRandomizer.mat.SetColor("_Color_Metal_Primary", characterRandomizer.metalPrimary[clampedIndex]);
+        }
+        
+        // Apply tattoo / body art color
+        if (characterRandomizer.bodyArt.Length > 0)
+        {
+            int clampedIndex = Mathf.Clamp(tattooColorIndex, 0, characterRandomizer.bodyArt.Length - 1);
+            characterRandomizer.mat.SetColor("_Color_BodyArt", characterRandomizer.bodyArt[clampedIndex]);
         }
     }
     

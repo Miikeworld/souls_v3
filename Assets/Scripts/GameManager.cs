@@ -170,18 +170,30 @@ public class GameManager : MonoBehaviour
     {
         if (lastBonfire != null)
         {
-            player.transform.position = respawnPosition;
+            // Spawn slightly higher to avoid getting stuck in bonfire
+            Vector3 spawnPos = respawnPosition + Vector3.up * 1.5f;
+            player.transform.position = spawnPos;
             player.transform.rotation = respawnRotation;
             
             // Reset player state
             Entity playerEntity = player.GetComponent<Entity>();
+            PlayerController playerController = player.GetComponent<PlayerController>();
             if (playerEntity != null)
             {
+                playerEntity.isDead = false;
                 playerEntity.currentHealth = playerEntity.maxHealth;
                 playerEntity.currentStamina = playerEntity.maxStamina;
                 playerEntity.currentMana = playerEntity.maxMana;
                 playerEntity.RestorePotions();
                 playerEntity.InvokeResourceEvents();
+            }
+
+            // Re-enable character controller
+            if (playerController != null)
+            {
+                CharacterController controller = player.GetComponent<CharacterController>();
+                if (controller != null)
+                    controller.enabled = true;
             }
             
             Debug.Log("Player respawned at bonfire: " + lastBonfire.bonfireName);
