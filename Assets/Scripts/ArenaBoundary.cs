@@ -7,6 +7,8 @@ using UnityEngine;
 /// </summary>
 public class ArenaBoundary : MonoBehaviour
 {
+    public static ArenaBoundary Instance { get; private set; }
+
     [Header("Boss Reference")]
     [Tooltip("The boss entity. When this boss dies, the boundary will be disabled.")]
     public Entity boss;
@@ -24,6 +26,41 @@ public class ArenaBoundary : MonoBehaviour
 
     private Collider[] createdColliders;
     private bool wasAlive = true;
+    private bool boundaryActive = false;
+
+    void Awake()
+    {
+        Instance = this;
+    }
+
+    /// <summary>
+    /// Returns the world-space bounds of the arena (XZ plane).
+    /// </summary>
+    public Bounds GetBounds()
+    {
+        return new Bounds(transform.position, arenaSize);
+    }
+
+    /// <summary>
+    /// Clamps a world position to stay within the arena. Returns clamped position.
+    /// </summary>
+    public Vector3 ClampPosition(Vector3 pos)
+    {
+        if (!boundaryActive) return pos;
+        Bounds b = GetBounds();
+        pos.x = Mathf.Clamp(pos.x, b.min.x, b.max.x);
+        pos.z = Mathf.Clamp(pos.z, b.min.z, b.max.z);
+        return pos;
+    }
+
+    /// <summary>
+    /// Static helper — returns pos unchanged if no boundary exists.
+    /// </summary>
+    public static Vector3 Clamp(Vector3 pos)
+    {
+        if (Instance == null) return pos;
+        return Instance.ClampPosition(pos);
+    }
 
     void Start()
     {
@@ -101,6 +138,7 @@ public class ArenaBoundary : MonoBehaviour
 
             wall.transform.localPosition = pos;
             collider.size = size;
+            collider.enabled = false; // Disabled until boss fight starts
             createdColliders[i] = collider;
         }
 
@@ -113,6 +151,8 @@ public class ArenaBoundary : MonoBehaviour
     /// </summary>
     public void DisableBoundary()
     {
+        boundaryActive = false;
+
         if (createdColliders == null || createdColliders.Length == 0) return;
 
         foreach (Collider col in createdColliders)
@@ -129,6 +169,7 @@ public class ArenaBoundary : MonoBehaviour
     /// </summary>
     public void EnableBoundary()
     {
+        boundaryActive = true;
         if (createdColliders == null || createdColliders.Length == 0) return;
 
         foreach (Collider col in createdColliders)

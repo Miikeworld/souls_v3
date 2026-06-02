@@ -98,7 +98,6 @@ public class CameraFollow : MonoBehaviour
         if (lockOnTarget == null) return;
 
         // ── 1. Position: behind player relative to enemy ──
-        // Camera behind player, based on direction to enemy
         Vector3 toEnemy = lockOnTarget.position - target.position;
         toEnemy.y = 0f;
         Vector3 desiredPos = transform.position;
@@ -110,23 +109,22 @@ public class CameraFollow : MonoBehaviour
             desiredPos = target.position + behindOffset;
         }
 
-        // Smooth position follow (faster for tighter tracking)
-        float smoothFactor = 1f - Mathf.Pow(0.5f, 50f * Time.deltaTime);
-        transform.position = Vector3.Lerp(transform.position, desiredPos, smoothFactor);
+        // Instant position follow — no lag
+        transform.position = desiredPos;
 
         // Simple collision check - use lockOn layers when locked on
         Vector3 pivot = target.position + Vector3.up * 1.2f;
         LayerMask layersToUse = isLockedOn && lockOnCollisionLayers != 0 ? lockOnCollisionLayers : collisionLayers;
         transform.position = HandleCameraCollisionWithLayers(pivot, transform.position, layersToUse);
 
-        // ── 2. Rotation: look at enemy directly ──
+        // ── 2. Rotation: look at enemy (near-instant) ──
         Vector3 enemyCenter = lockOnTarget.position + Vector3.up * 1.0f;
         Vector3 toLook = enemyCenter - transform.position;
         if (toLook.sqrMagnitude > 0.01f)
         {
             Quaternion desiredRot = Quaternion.LookRotation(toLook, Vector3.up);
-            transform.rotation = Quaternion.Slerp(transform.rotation, desiredRot,
-                1f - Mathf.Exp(-60f * Time.deltaTime));
+            float rotFactor = 1f - Mathf.Exp(-200f * Time.deltaTime);
+            transform.rotation = Quaternion.Slerp(transform.rotation, desiredRot, rotFactor);
         }
 
         // Sync pitch/yaw so free camera resumes smoothly

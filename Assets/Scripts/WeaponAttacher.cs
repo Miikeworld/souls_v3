@@ -24,6 +24,9 @@ public class WeaponAttacher : MonoBehaviour
     public GameObject weaponPrefab;
     public Hand hand = Hand.Right;
 
+    [Header("Manual Hand Bone (fallback if auto-detect fails)")]
+    public Transform manualHandBone;
+
     [Header("Offset (fine-tune in Play mode, copy values back)")]
     public Vector3 positionOffset = Vector3.zero;
     public Vector3 rotationOffset = Vector3.zero;
@@ -51,7 +54,21 @@ public class WeaponAttacher : MonoBehaviour
 
     void Start()
     {
+        if (weaponPrefab == null)
+        {
+            Debug.LogWarning("[WeaponAttacher] No weapon prefab assigned. Please assign a weapon prefab in the Inspector.");
+            return;
+        }
+
+        // Try auto-detect first
         handBone = FindHandBone();
+
+        // Fallback to manual assignment if auto-detect fails
+        if (handBone == null && manualHandBone != null)
+        {
+            handBone = manualHandBone;
+            Debug.Log($"[WeaponAttacher] Using manually assigned hand bone: '{handBone.name}'");
+        }
 
         if (handBone == null)
         {
@@ -75,7 +92,11 @@ public class WeaponAttacher : MonoBehaviour
         foreach (string boneName in names)
         {
             Transform bone = FindBoneRecursive(transform, boneName, false);
-            if (bone != null) return bone;
+            if (bone != null)
+            {
+                Debug.Log($"[WeaponAttacher] Found exact match: '{boneName}'");
+                return bone;
+            }
         }
 
         // Try partial/contains match as fallback
@@ -90,10 +111,14 @@ public class WeaponAttacher : MonoBehaviour
             foreach (string keyword in keywords)
             {
                 if (lower.Contains("hand") && lower.Contains(keyword.Split('_')[0]))
+                {
+                    Debug.Log($"[WeaponAttacher] Found partial match: '{child.name}' for keyword '{keyword}'");
                     return child;
+                }
             }
         }
 
+        Debug.LogWarning($"[WeaponAttacher] No hand bone found. Character model may use non-standard bone names.");
         return null;
     }
 
@@ -126,6 +151,10 @@ public class WeaponAttacher : MonoBehaviour
         weaponInstance.transform.localPosition = positionOffset;
         weaponInstance.transform.localRotation = Quaternion.Euler(rotationOffset);
 
+        Debug.Log($"[WeaponAttacher] Weapon instantiated. Parent: '{weaponInstance.transform.parent.name}', " +
+            $"WorldPos: {weaponInstance.transform.position}, LocalPos: {weaponInstance.transform.localPosition}, " +
+            $"Scale: {weaponInstance.transform.lossyScale}");
+
         // Auto-setup WeaponHitbox owner if present
         WeaponHitbox hitbox = weaponInstance.GetComponent<WeaponHitbox>();
         if (hitbox == null)
@@ -138,6 +167,34 @@ public class WeaponAttacher : MonoBehaviour
             {
                 hitbox.owner = ownerEntity;
                 hitbox.Deactivate();
+                Debug.Log($"[WeaponAttacher] WeaponHitbox found and configured");
+            }
+
+            // Auto-assign to PlayerController — always use the live instance, not any prefab reference
+            PlayerController pc = GetComponent<PlayerController>();
+            if (pc != null)
+            {
+                pc.weaponHitbox = hitbox;
+                Debug.Log("[WeaponAttacher] Assigned live WeaponHitbox to PlayerController");
+            }
+        }
+        else
+        {
+            Debug.LogWarning("[WeaponAttacher] No WeaponHitbox found on weapon prefab");
+        }
+
+        // Check if weapon has a renderer
+        Renderer[] rends = weaponInstance.GetComponentsInChildren<Renderer>(true);
+        if (rends.Length == 0)
+        {
+            Debug.LogWarning("[WeaponAttacher] No Renderer found on weapon prefab - weapon will be invisible!");
+        }
+        else
+        {
+            foreach (Renderer r in rends)
+            {
+                r.enabled = true; // Force enable in case it was disabled
+                Debug.Log($"[WeaponAttacher] Renderer '{r.gameObject.name}' enabled, bounds: {r.bounds.size}");
             }
         }
 

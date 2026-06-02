@@ -174,7 +174,7 @@ public class GameManager : MonoBehaviour
             Vector3 spawnPos = respawnPosition + Vector3.up * 1.5f;
             player.transform.position = spawnPos;
             player.transform.rotation = respawnRotation;
-            
+
             // Reset player state
             Entity playerEntity = player.GetComponent<Entity>();
             PlayerController playerController = player.GetComponent<PlayerController>();
@@ -195,12 +195,43 @@ public class GameManager : MonoBehaviour
                 if (controller != null)
                     controller.enabled = true;
             }
-            
+
+            // Reset boss health when player dies
+            ResetBossHealth();
+
             Debug.Log("Player respawned at bonfire: " + lastBonfire.bonfireName);
         }
         else
         {
             Debug.LogWarning("No bonfire set for respawn!");
+        }
+    }
+
+    void ResetBossHealth()
+    {
+        GameObject[] enemies = GameObject.FindGameObjectsWithTag("Enemy");
+        foreach (GameObject enemy in enemies)
+        {
+            BossController boss = enemy.GetComponent<BossController>();
+            if (boss != null)
+            {
+                Entity bossEntity = enemy.GetComponent<Entity>();
+                if (bossEntity != null)
+                {
+                    bossEntity.currentHealth = bossEntity.maxHealth;
+                    bossEntity.isDead = false;
+                    bossEntity.InvokeResourceEvents();
+
+                    // Reset boss position to initial position
+                    if (boss.initialPosition != Vector3.zero)
+                    {
+                        enemy.transform.position = boss.initialPosition;
+                        Debug.Log("Boss position reset after player death");
+                    }
+
+                    Debug.Log("Boss health reset after player death");
+                }
+            }
         }
     }
     

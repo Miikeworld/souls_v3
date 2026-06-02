@@ -73,7 +73,8 @@ public class CinemachineLockOnCamera : MonoBehaviour
         }
 
         // Ensure cursor stays locked (unlocked cursor prevents mouse camera control)
-        if (Cursor.lockState != CursorLockMode.Locked)
+        // But don't override if cursor is intentionally visible (e.g. bonfire UI open)
+        if (Cursor.lockState != CursorLockMode.Locked && !Cursor.visible)
             Cursor.lockState = CursorLockMode.Locked;
     }
 
@@ -99,7 +100,7 @@ public class CinemachineLockOnCamera : MonoBehaviour
         }
 
         cachedBrain.DefaultBlend = new CinemachineBlendDefinition(
-            CinemachineBlendDefinition.Styles.EaseInOut, 0.4f);
+            CinemachineBlendDefinition.Styles.EaseInOut, 0.15f);
 
         // Start with CameraFollow disabled, Cinemachine free cam active
         if (cachedCameraFollow != null) cachedCameraFollow.enabled = false;
@@ -120,6 +121,13 @@ public class CinemachineLockOnCamera : MonoBehaviour
         orbital.TargetOffset = new Vector3(0f, freeHeight, 0f);
         orbital.OrbitStyle = CinemachineOrbitalFollow.OrbitStyles.Sphere;
         orbital.Radius = freeDistance;
+        orbital.TrackerSettings = new TrackerSettings
+        {
+            BindingMode = BindingMode.WorldSpace,
+            PositionDamping = new Vector3(0.3f, 0.3f, 0.3f),
+            RotationDamping = Vector3.zero,
+            QuaternionDamping = 0f
+        };
 
         // Input axis controller for mouse orbit
         go.AddComponent<CinemachineInputAxisController>();
@@ -146,7 +154,7 @@ public class CinemachineLockOnCamera : MonoBehaviour
         follow.TrackerSettings = new TrackerSettings
         {
             BindingMode = BindingMode.WorldSpace,
-            PositionDamping = new Vector3(0.8f, 0.5f, 0.8f),
+            PositionDamping = new Vector3(0.4f, 0.3f, 0.4f),
             RotationDamping = Vector3.zero,
             QuaternionDamping = 0f
         };

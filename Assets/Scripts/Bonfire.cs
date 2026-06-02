@@ -372,12 +372,12 @@ public class Bonfire : MonoBehaviour
     void InteractWithBonfire()
     {
         Debug.Log("InteractWithBonfire called. Player entity: " + (playerEntity != null ? "found" : "not found"));
-        
+
         if (!isLit)
         {
             LightBonfire();
         }
-        
+
         // Full heal and restore potions at bonfire
         if (playerEntity != null)
         {
@@ -387,6 +387,9 @@ public class Bonfire : MonoBehaviour
         {
             Debug.LogError("Player entity is null!");
         }
+
+        // Respawn all enemies
+        GameManager.Instance.RespawnEnemies();
     }
     
     void LightBonfire()
