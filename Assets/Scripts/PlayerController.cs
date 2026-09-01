@@ -16,8 +16,6 @@ public class PlayerController : Entity
     [Header("Animation")]
     public Animator animator;
     public float animationSpeedMultiplier = 1f;
-    [Tooltip("Assign PlayerAnimatorController here if your Animator uses a different controller")]
-    public RuntimeAnimatorController fullAnimatorController;
     
     [Header("Roll")]
     public float rollDuration = 1.0f;
@@ -39,14 +37,6 @@ public class PlayerController : Entity
     [Header("Lock-On")]
     public LockOnSystem lockOnSystem;
     
-    [Header("Potion Flask")]
-    [Tooltip("Potion model prefab (e.g. SM_Item_Potion_01). Spawned in left hand during healing.")]
-    public GameObject potionFlaskPrefab;
-    [Tooltip("Left hand bone name in skeleton.")]
-    public string leftHandBoneName = "Hand_L";
-    public Vector3 flaskPositionOffset = Vector3.zero;
-    public Vector3 flaskRotationOffset = Vector3.zero;
-
     [Header("Abilities")]
     public float fireballDamage = 30f;
     public float fireballManaCost = 25f;
@@ -72,7 +62,7 @@ public class PlayerController : Entity
     private float comboCooldown = 0f;
     private float comboCooldownDuration = 1.5f;
     
-    // 3-hit combo animation names (must match MagicalKnightController states)
+    // Katana 3-hit combo animation names
     private readonly string[] comboAnims = { "Attack_3Combo_1", "Attack_3Combo_2", "Attack_3Combo_3" };
     private readonly float[] comboDurations = { 1.27f, 1.17f, 2.43f }; // frames / 30fps
     private float currentAttackTimer = 0f;
@@ -84,7 +74,7 @@ public class PlayerController : Entity
     private float healDuration = 2.67f;
     private float emptyPotionDuration = 2.17f;
     private float healMoveSpeedMultiplier = 0.4f;
-    private int upperBodyLayerIndex = 0;
+    private int upperBodyLayerIndex = 1;
     
     // Hit reaction
     private bool isStaggered = false;
@@ -93,10 +83,6 @@ public class PlayerController : Entity
     
     // Movement tracking
     private float currentMoveSpeed = 0f;
-    
-    // Flask prop
-    private GameObject flaskInstance;
-    private Transform leftHandBone;
     
     // Jump/Fall state
     private bool isJumping = false;
@@ -128,10 +114,7 @@ public class PlayerController : Entity
             animator = GetComponent<Animator>();
         
         if (animator != null)
-        {
             animator.applyRootMotion = true;
-            Debug.Log($"[PlayerController] Animator controller: {animator.runtimeAnimatorController?.name ?? "NONE"}");
-        }
         
         if (castPoint == null)
         {
@@ -140,43 +123,6 @@ public class PlayerController : Entity
             cp.transform.localPosition = new Vector3(0f, 1.5f, 0.5f);
             castPoint = cp.transform;
         }
-        
-        // Auto-find WeaponHitbox in children — always prefer the scene instance
-        // (Inspector might reference a prefab asset whose Awake() never ran)
-        WeaponHitbox childHitbox = GetComponentInChildren<WeaponHitbox>(true);
-        if (childHitbox != null)
-        {
-            weaponHitbox = childHitbox;
-            weaponHitbox.owner = this;
-            Debug.Log($"[PlayerController] Found WeaponHitbox on child '{weaponHitbox.gameObject.name}'");
-        }
-        else if (weaponHitbox != null && weaponHitbox.gameObject.scene.name == null)
-        {
-            // Assigned reference is a prefab asset, not a scene object — clear it
-            Debug.LogWarning("[PlayerController] WeaponHitbox references a prefab, not a scene object. Clearing.");
-            weaponHitbox = null;
-        }
-        
-        Debug.Log($"[PlayerController] WeaponHitbox assigned: {weaponHitbox != null}");
-
-        // Find left hand bone for flask prop
-        if (!string.IsNullOrEmpty(leftHandBoneName))
-        {
-            leftHandBone = FindBoneRecursive(transform, leftHandBoneName);
-            if (leftHandBone != null)
-                Debug.Log($"[PlayerController] Found left hand bone: {leftHandBone.name}");
-        }
-    }
-
-    Transform FindBoneRecursive(Transform parent, string boneName)
-    {
-        if (parent.name == boneName) return parent;
-        for (int i = 0; i < parent.childCount; i++)
-        {
-            Transform found = FindBoneRecursive(parent.GetChild(i), boneName);
-            if (found != null) return found;
-        }
-        return null;
     }
     
     protected override void Update()
@@ -212,7 +158,7 @@ public class PlayerController : Entity
                     // No queue or combo done — return to movement
                     isAttacking = false;
                     comboQueued = false;
-                    if (animator != null) PlayAnimState("Movement", 0.2f);
+                    if (animator != null) animator.CrossFade("Movement", 0.2f);
                 }
             }
         }
@@ -224,7 +170,7 @@ public class PlayerController : Entity
             if (staggerTimer <= 0f)
             {
                 isStaggered = false;
-                if (animator != null) PlayAnimState("Movement", 0.2f);
+                if (animator != null) animator.CrossFade("Movement", 0.2f);
             }
         }
         
@@ -235,10 +181,10 @@ public class PlayerController : Entity
             if (healTimer <= 0f)
             {
                 isHealing = false;
-                DestroyFlaskProp();
                 if (animator != null)
                 {
-                    PlayAnimState("Movement", 0.2f);
+                    animator.SetLayerWeight(upperBodyLayerIndex, 0f);
+                    animator.CrossFade("Movement", 0.2f, 0);
                 }
             }
         }
@@ -249,27 +195,9 @@ public class PlayerController : Entity
         {
             HandleRoll();
         }
-        else if (!isAttacking && !isStaggered && !isHealing)
+        else if (!isAttacking && !isStaggered)
         {
             HandleMovement();
-        }
-        else if (isHealing)
-        {
-            // Allow slow movement during healing but don't change anim state
-            float h = Input.GetAxis("Horizontal");
-            float v = Input.GetAxis("Vertical");
-            if (Mathf.Abs(h) > 0.1f || Mathf.Abs(v) > 0.1f)
-            {
-                Camera cam = Camera.main;
-                if (cam != null)
-                {
-                    Vector3 camForward = new Vector3(cam.transform.forward.x, 0, cam.transform.forward.z).normalized;
-                    Vector3 camRight = new Vector3(cam.transform.right.x, 0, cam.transform.right.z).normalized;
-                    Vector3 moveDir = (camForward * v + camRight * h).normalized;
-                    controller.Move(moveDir * walkSpeed * healMoveSpeedMultiplier * Time.deltaTime);
-                }
-            }
-            currentMoveSpeed = 0f;
         }
         
         ApplyGravity();
@@ -296,18 +224,18 @@ public class PlayerController : Entity
             airTime = 0f;
             currentMoveSpeed = 0f;
             animator.ResetTrigger("Jump");
-            if (!isRolling && !isAttacking && !isStaggered && !isHealing)
-                PlayAnimState("Movement", 0.15f);
+            if (!isRolling && !isAttacking)
+                animator.CrossFade("Movement", 0.15f);
         }
         
         // Falling detection
-        if (!controller.isGrounded && !isRolling && !isAttacking && !isStaggered && !isHealing)
+        if (!controller.isGrounded && !isRolling && !isAttacking)
         {
             airTime += Time.deltaTime;
             if (!isFalling && (airTime > jumpAnimDuration || !isJumping))
             {
                 isFalling = true;
-                PlayAnimState("Jump_ALL", 0.2f);
+                animator.CrossFade("jump", 0.2f);
             }
         }
         else if (controller.isGrounded)
@@ -358,9 +286,9 @@ public class PlayerController : Entity
         // Use Potion (R key)
         if (Input.GetKeyDown(KeyCode.R) && !isHealing && !isRolling && !isAttacking && !isStaggered && controller.isGrounded)
         {
-            if (currentPotions > 0)
+            if (currentPotions > 0 && currentHealth < maxHealth)
                 StartHealing();
-            else
+            else if (currentPotions <= 0)
                 StartEmptyPotion();
         }
         
@@ -474,13 +402,6 @@ public class PlayerController : Entity
             velocity.y += gravity * Time.deltaTime;
         
         controller.Move(velocity * Time.deltaTime);
-
-        // Clamp player within arena boundary
-        Vector3 clamped = ArenaBoundary.Clamp(transform.position);
-        if (clamped != transform.position)
-        {
-            transform.position = clamped;
-        }
     }
     
     // ===== HEALING =====
@@ -492,11 +413,12 @@ public class PlayerController : Entity
         
         if (animator != null)
         {
-            PlayAnimState("Potion_Drink", 0.15f);
-            Debug.Log($"[PlayerController] StartHealing — potions={currentPotions}, health={currentHealth}/{maxHealth}");
+            animator.SetLayerWeight(upperBodyLayerIndex, 1f);
+            animator.Play("Potion_Drink", upperBodyLayerIndex, 0f);
+            // Use sharp walking on lower body instead of Potion_Drink (which leans back)
+            animator.CrossFade("HealWalk", 0.15f, 0);
         }
         
-        SpawnFlaskProp();
         Invoke(nameof(ApplyHeal), 1.2f);
     }
     
@@ -507,40 +429,15 @@ public class PlayerController : Entity
         
         if (animator != null)
         {
-            PlayAnimState("Potion_Empty", 0.15f);
+            animator.SetLayerWeight(upperBodyLayerIndex, 1f);
+            animator.Play("Potion_Empty", upperBodyLayerIndex, 0f);
+            animator.CrossFade("HealWalk", 0.15f, 0);
         }
-        
-        SpawnFlaskProp();
     }
     
     void ApplyHeal()
     {
         UsePotion();
-    }
-
-    void SpawnFlaskProp()
-    {
-        if (potionFlaskPrefab == null || leftHandBone == null) return;
-        if (flaskInstance != null) Destroy(flaskInstance);
-        
-        flaskInstance = Instantiate(potionFlaskPrefab, leftHandBone);
-        flaskInstance.transform.localPosition = flaskPositionOffset;
-        flaskInstance.transform.localRotation = Quaternion.Euler(flaskRotationOffset);
-        
-        // Remove any colliders/rigidbodies so the flask doesn't interfere with physics
-        foreach (var col in flaskInstance.GetComponentsInChildren<Collider>())
-            Destroy(col);
-        foreach (var rb in flaskInstance.GetComponentsInChildren<Rigidbody>())
-            Destroy(rb);
-    }
-
-    void DestroyFlaskProp()
-    {
-        if (flaskInstance != null)
-        {
-            Destroy(flaskInstance);
-            flaskInstance = null;
-        }
     }
     
     // ===== ROLL =====
@@ -563,7 +460,7 @@ public class PlayerController : Entity
         iframeTimer = rollIframeDuration;
         
         if (animator != null)
-            PlayAnimState("roll_forward", 0.05f);
+            animator.CrossFade("roll_forward", 0.05f);
     }
     
     void StartBackstep()
@@ -583,7 +480,7 @@ public class PlayerController : Entity
         rollDirection = -transform.forward;
         
         if (animator != null)
-            PlayAnimState("roll_forward", 0.05f);
+            animator.CrossFade("move_step_back", 0.05f);
     }
     
     void HandleRoll()
@@ -596,7 +493,7 @@ public class PlayerController : Entity
             isRolling = false;
             iframeTimer = 0f;
             if (animator != null)
-                PlayAnimState("Movement", 0.1f);
+                animator.CrossFade("Movement", 0.1f);
             return;
         }
     }
@@ -611,13 +508,11 @@ public class PlayerController : Entity
             comboCooldown = comboCooldownDuration;
             isAttacking = false;
             comboQueued = false;
-            if (animator != null) PlayAnimState("Movement");
+            if (animator != null) animator.CrossFade("Movement", 0.2f);
             return;
         }
         
         isAttacking = true;
-        
-        Debug.Log($"[PlayerController] Attack! ComboStep={comboStep}, Anim='{comboAnims[comboStep]}', HasWeaponHitbox={weaponHitbox != null}");
         
         // Face enemy if locked on
         if (IsLockedOn)
@@ -629,7 +524,7 @@ public class PlayerController : Entity
         }
         
         if (animator != null)
-            PlayAnimState(comboAnims[comboStep]);
+            animator.CrossFade(comboAnims[comboStep], 0.1f);
         
         // Activate weapon hitbox via timer (in case animation events are not set up)
         float clipDur = comboDurations[comboStep];
@@ -676,7 +571,7 @@ public class PlayerController : Entity
             }
             
             if (animator != null)
-                PlayAnimState("Damage_Front_Small_ver_A", 0.05f);
+                animator.CrossFade("Damage_Front_Small_ver_A", 0.05f);
 
             // Camera shake on hit — scales continuously with health
             float healthPercent = currentHealth / maxHealth;
@@ -718,7 +613,7 @@ public class PlayerController : Entity
         comboQueued = false;
         currentAttackTimer = 0f;
         if (animator != null && !isRolling && !isJumping)
-            PlayAnimState("Movement", 0.2f);
+            animator.CrossFade("Movement", 0.2f);
     }
     
     /// <summary>Called by animation event — enables weapon hitbox.</summary>
@@ -728,11 +623,6 @@ public class PlayerController : Entity
         {
             weaponHitbox.owner = this;
             weaponHitbox.Activate(attackDamage);
-            Debug.Log($"[PlayerController] Hitbox ACTIVATED — damage={attackDamage}, collider={weaponHitbox.GetComponent<Collider>()?.bounds.size}");
-        }
-        else
-        {
-            Debug.LogWarning("[PlayerController] ActivateHitbox called but weaponHitbox is null!");
         }
     }
     
@@ -780,7 +670,7 @@ public class PlayerController : Entity
         CancelInvoke(nameof(DealMeleeDamage));
 
         if (animator != null)
-            PlayAnimState("Movement", 0.1f);
+            animator.CrossFade("Damage_Die", 0.1f);
 
         // Disable character controller to allow falling to ground
         if (controller != null)
@@ -824,18 +714,6 @@ public class PlayerController : Entity
         }
     }
     
-    /// <summary>
-    /// Plays an animation state safely. Returns true if the animator exists.
-    /// </summary>
-    bool PlayAnimState(string stateName, float transitionDuration = 0.1f)
-    {
-        if (animator == null) return false;
-        
-        // Use CrossFade with state name directly — more reliable than HasState + hash
-        animator.CrossFade(stateName, transitionDuration, 0);
-        return true;
-    }
-
     void OnDrawGizmosSelected()
     {
         Gizmos.color = Color.red;

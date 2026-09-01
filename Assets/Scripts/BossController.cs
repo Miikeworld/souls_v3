@@ -16,9 +16,9 @@ public class BossController : Entity
     [Header("Boss Settings")]
     public string bossName = "Arcane Tyrant";
     public float detectionRange = 25f;
-    public float rotationSpeed = 6f;
-    public float walkSpeed = 2f;
-    public float runSpeed = 3f;
+    public float rotationSpeed = 8f;
+    public float walkSpeed = 3.5f;
+    public float runSpeed = 5.5f;
 
     [Header("Combat — Ranged")]
     public float attackRange = 15f;
@@ -64,7 +64,6 @@ public class BossController : Entity
     //  RUNTIME STATE
     // ══════════════════════════════════════════════════════════════
     [HideInInspector] public BossState currentState = BossState.Idle;
-    [HideInInspector] public Vector3 initialPosition;
 
     private Transform      player;
     private Animator       animator;
@@ -114,17 +113,14 @@ public class BossController : Entity
 
     void BuildAttackTable()
     {
-        // ── single-cast ranged attacks (skip 04, 05, 08) ──
+        // ── 6 single-cast ranged attacks ──
         for (int i = 1; i <= 6; i++)
-        {
-            if (i == 4 || i == 5 || i == 8) continue; // attacks the model can't perform
             rangedAttacks.Add(new AttackEntry(
                 $"Attack{i:D2}",
                 new[] { $"Frank_RPG_Mage_Attack{i:D2}" },
                 1.4f, 1f, attackRange, false, AttackType.Projectile));
-        }
 
-        // ── 3 combo sets (Combo03 removed — ground slam) ──
+        // ── 4 combo sets ──
         comboAttacks.Add(new AttackEntry("Combo01", new[] {
             "Frank_RPG_Mage_Combo01_1","Frank_RPG_Mage_Combo01_2","Frank_RPG_Mage_Combo01_3"
         }, 2.1f, 0.8f, damageRange, false, AttackType.Combo));
@@ -133,7 +129,9 @@ public class BossController : Entity
             "Frank_RPG_Mage_Combo02_1","Frank_RPG_Mage_Combo02_2","Frank_RPG_Mage_Combo02_3"
         }, 2.1f, 0.9f, damageRange, false, AttackType.Combo));
 
-        // Combo03 removed — ground-slam attack the model can't perform
+        comboAttacks.Add(new AttackEntry("Combo03", new[] {
+            "Frank_RPG_Mage_Combo03_1","Frank_RPG_Mage_Combo03_2","Frank_RPG_Mage_Combo03_3"
+        }, 2.1f, 1f, damageRange, false, AttackType.Combo));
 
         comboAttacks.Add(new AttackEntry("Combo04", new[] {
             "Frank_RPG_Mage_Combo04_1","Frank_RPG_Mage_Combo04_2","Frank_RPG_Mage_Combo04_3","Frank_RPG_Mage_Combo04_4"
@@ -166,10 +164,6 @@ public class BossController : Entity
     {
         base.Start();
 
-        // Store initial position for reset when player dies
-        initialPosition = transform.position;
-        lastPosition = transform.position;
-
         player      = GameObject.FindGameObjectWithTag("Player")?.transform;
         animator    = GetComponent<Animator>();
         agent       = GetComponent<NavMeshAgent>();
@@ -184,15 +178,6 @@ public class BossController : Entity
         }
 
         if (weaponHitbox != null) { weaponHitbox.owner = this; weaponHitbox.Deactivate(); }
-
-        // Ensure boss has a kinematic Rigidbody so weapon triggers can detect it
-        Rigidbody rb = GetComponent<Rigidbody>();
-        if (rb == null)
-        {
-            rb = gameObject.AddComponent<Rigidbody>();
-            rb.isKinematic = true;
-            rb.useGravity = false;
-        }
 
         // Find lock-on system so we can break lock when teleporting
         PlayerController pc = FindObjectOfType<PlayerController>();
@@ -241,10 +226,6 @@ public class BossController : Entity
         }
 
         UpdateAnimatorParams();
-        KeepGrounded();
-
-        // Clamp boss within arena boundary (NavMeshAgent ignores physics walls)
-        transform.position = ArenaBoundary.Clamp(transform.position);
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -254,12 +235,7 @@ public class BossController : Entity
     {
         if (player == null) return;
         if (Vector3.Distance(transform.position, player.position) <= detectionRange)
-        {
             currentState = BossState.Chasing;
-            // Activate arena boundary when boss fight begins
-            if (ArenaBoundary.Instance != null)
-                ArenaBoundary.Instance.EnableBoundary();
-        }
     }
 
     void HandleChasing()
@@ -295,64 +271,32 @@ public class BossController : Entity
         }
 
         // ── MOVEMENT — boss should always be visibly moving ──
-        // Boss always faces player, so movement direction = forward (matching walk anim)
-        if (agent != null && agent.enabled && agent.isOnNavMesh)
-        {
-            // NavMesh-based movement
-            SetAgentEnabled(true);
+        SetAgentEnabled(true);
+        if (agent == null || !agent.enabled || !agent.isOnNavMesh) return;
 
-            if (dist > preferredRange)
-            {
-                agent.speed = dist > attackRange ? runSpeed : walkSpeed;
-                agent.SetDestination(player.position);
-            }
-            else if (dist >= closeRange && dist <= preferredRange)
-            {
-                // Circle the player: move to a point on a circle around the player
-                agent.speed = walkSpeed * 0.6f;
-                float angle = Mathf.Sin(Time.time * 0.5f) * 90f; // Slowly sweep angle
-                Vector3 toPlayer = (player.position - transform.position).normalized;
-                Vector3 circleDir = Quaternion.Euler(0f, angle, 0f) * -toPlayer;
-                Vector3 circleTarget = player.position + circleDir * preferredRange * 0.8f;
-                agent.SetDestination(circleTarget);
-            }
-            else
-            {
-                // Too close — back away toward preferred range
-                agent.speed = walkSpeed;
-                Vector3 awayDir = (transform.position - player.position).normalized;
-                agent.SetDestination(transform.position + awayDir * 4f);
-            }
+        if (dist > preferredRange)
+        {
+            // Run toward player when far
+            agent.speed = dist > attackRange ? runSpeed : walkSpeed;
+            agent.SetDestination(player.position);
+        }
+        else if (dist >= closeRange && dist <= preferredRange)
+        {
+            // Circle/strafe around the player while waiting for cooldown
+            agent.speed = walkSpeed * 0.8f;
+            Vector3 toPlayer = (player.position - transform.position).normalized;
+            Vector3 strafeDir = Vector3.Cross(Vector3.up, toPlayer);
+            // Swap strafe direction every ~3 seconds
+            if (Mathf.Sin(Time.time * 0.7f) > 0f) strafeDir = -strafeDir;
+            Vector3 strafeTarget = transform.position + strafeDir * 4f + toPlayer * 0.5f;
+            agent.SetDestination(strafeTarget);
         }
         else
         {
-            // Fallback: transform-based movement (no NavMesh)
-            Vector3 toPlayer = (player.position - transform.position);
-            toPlayer.y = 0f;
-            Vector3 toPlayerDir = toPlayer.normalized;
-
-            if (dist > preferredRange)
-            {
-                float speed = dist > attackRange ? runSpeed : walkSpeed;
-                transform.position += toPlayerDir * speed * Time.deltaTime;
-            }
-            else if (dist >= closeRange && dist <= preferredRange)
-            {
-                // Circle the player: blend forward + lateral for smooth arc
-                float angle = Mathf.Sin(Time.time * 0.5f) * 90f;
-                Vector3 circleDir = Quaternion.Euler(0f, angle, 0f) * -toPlayerDir;
-                Vector3 circleTarget = player.position + circleDir * preferredRange * 0.8f;
-                Vector3 moveDir = (circleTarget - transform.position);
-                moveDir.y = 0f;
-                moveDir.Normalize();
-                transform.position += moveDir * walkSpeed * 0.6f * Time.deltaTime;
-            }
-            else
-            {
-                // Too close — back away
-                Vector3 awayDir = -toPlayerDir;
-                transform.position += awayDir * walkSpeed * Time.deltaTime;
-            }
+            // Too close — back away
+            agent.speed = walkSpeed;
+            Vector3 awayDir = (transform.position - player.position).normalized;
+            agent.SetDestination(transform.position + awayDir * 4f);
         }
     }
 
@@ -414,6 +358,7 @@ public class BossController : Entity
         animator.Play(atk.clips[0], 0, 0f);
         PlayAttackSound();
         yield return new WaitForSeconds(atk.duration * 0.55f);
+        // Fire a projectile if prefab exists, otherwise fall back to instant damage
         if (projectilePrefab != null && player != null)
             FireProjectile();
         else
@@ -531,10 +476,6 @@ public class BossController : Entity
         isAttacking = false;
         SetAgentEnabled(true);
         currentState = BossState.Chasing;
-
-        // Return to Locomotion blend tree for walk/run animations
-        if (animator != null)
-            animator.CrossFade("Locomotion", 0.25f);
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -557,10 +498,6 @@ public class BossController : Entity
             : Random.Range(attackCooldownMin, attackCooldownMax);
         SetAgentEnabled(true);
         currentState = BossState.Chasing;
-
-        // Return to Locomotion blend tree for walk/run animations
-        if (animator != null)
-            animator.CrossFade("Locomotion", 0.25f);
     }
 
     void FacePlayer()
@@ -608,7 +545,7 @@ public class BossController : Entity
 
     void DealDamageAround(float damage, float radius)
     {
-        // Spawn ring effect for visual feedback
+        // Spawn ring effect for visual feedback (safe now with safeguard in AOERingEffect)
         if (aoeRingMaterial != null)
         {
             AOERingEffect.Spawn(transform.position, aoeRingMaterial, radius, aoeRingDuration);
@@ -622,35 +559,6 @@ public class BossController : Entity
                 if (playerEntity != null) playerEntity.TakeDamage(damage, this);
             }
         }
-    }
-
-    void SpawnFallbackAOE(float radius)
-    {
-        GameObject ring = new GameObject("FallbackAOE");
-        ring.transform.position = transform.position + Vector3.up * 0.1f;
-        LineRenderer lr = ring.AddComponent<LineRenderer>();
-        lr.useWorldSpace = false;
-        lr.loop = true;
-        lr.startWidth = 0.15f;
-        lr.endWidth = 0.15f;
-
-        // Create a simple material
-        Material mat = new Material(Shader.Find("Universal Render Pipeline/Lit"));
-        mat.color = new Color(1f, 0.3f, 0f, 0.8f); // Orange glow
-        mat.SetColor("_EmissionColor", new Color(1f, 0.5f, 0f) * 2f);
-        mat.EnableKeyword("_EMISSION");
-        lr.material = mat;
-
-        // Draw circle
-        int segments = 32;
-        lr.positionCount = segments;
-        for (int i = 0; i < segments; i++)
-        {
-            float angle = (float)i / segments * Mathf.PI * 2f;
-            lr.SetPosition(i, new Vector3(Mathf.Cos(angle) * radius, 0f, Mathf.Sin(angle) * radius));
-        }
-
-        Destroy(ring, aoeRingDuration);
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -690,17 +598,7 @@ public class BossController : Entity
             rb.linearVelocity = dir * projectileSpeed;
 
         Projectile p = proj.GetComponent<Projectile>();
-        if (p != null)
-        {
-            p.damage = pendingDamage;
-            p.owner = this;
-            // Enable homing: slower speed, track player for short duration
-            p.enableHoming = true;
-            p.target = player;
-            p.homingDuration = 1.5f;
-            p.homingTurnSpeed = 4f;
-            p.speed = projectileSpeed * 0.6f; // Slower than original
-        }
+        if (p != null) { p.damage = pendingDamage; p.owner = this; }
 
         Destroy(proj, 10f);
     }
@@ -710,41 +608,11 @@ public class BossController : Entity
     // ══════════════════════════════════════════════════════════════
     //  ANIMATOR
     // ══════════════════════════════════════════════════════════════
-    private Vector3 lastPosition;
     void UpdateAnimatorParams()
     {
         if (animator == null) return;
-        if (Time.deltaTime <= 0f) return;
-
-        float rawSpeed = 0f;
-        if (agent != null && agent.enabled && agent.isOnNavMesh)
-        {
-            rawSpeed = agent.velocity.magnitude;
-        }
-        else
-        {
-            rawSpeed = (transform.position - lastPosition).magnitude / Time.deltaTime;
-            lastPosition = transform.position;
-        }
-
-        // Normalize to 0-1 range for blend tree (0=idle, 0.5=walk, 1=run)
-        float normalizedSpeed = 0f;
-        if (rawSpeed > 0.1f)
-        {
-            normalizedSpeed = Mathf.InverseLerp(walkSpeed * 0.5f, runSpeed, rawSpeed);
-            // Clamp to valid range
-            normalizedSpeed = Mathf.Clamp01(normalizedSpeed);
-            // Remap so idle=0, walk=0.5, run=1
-            normalizedSpeed = Mathf.Lerp(0.5f, 1f, normalizedSpeed);
-        }
-
-        animator.SetFloat("Speed", normalizedSpeed, 0.1f, Time.deltaTime);
-
-        // Debug log every 30 frames to avoid spam
-        if (Time.frameCount % 30 == 0)
-        {
-            Debug.Log($"[BossController] RawSpeed: {rawSpeed:F2}, NormalizedSpeed: {normalizedSpeed:F2}, State: {currentState}");
-        }
+        float speed = agent != null && agent.enabled ? agent.velocity.magnitude : 0f;
+        animator.SetFloat("Speed", speed, 0.1f, Time.deltaTime);
     }
 
     void OnAnimatorMove()
@@ -860,23 +728,6 @@ public class BossController : Entity
             transform.position = hit.position;
             if (agent != null && agent.enabled)
                 agent.Warp(hit.position);
-        }
-    }
-
-    void KeepGrounded()
-    {
-        // Skip if NavMeshAgent handles grounding
-        if (agent != null && agent.enabled && agent.isOnNavMesh) return;
-        if (currentState == BossState.Dead) return;
-
-        // Raycast down to find the ground
-        RaycastHit hit;
-        Vector3 origin = transform.position + Vector3.up * 1f;
-        if (Physics.Raycast(origin, Vector3.down, out hit, 50f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
-        {
-            Vector3 pos = transform.position;
-            pos.y = hit.point.y;
-            transform.position = pos;
         }
     }
 

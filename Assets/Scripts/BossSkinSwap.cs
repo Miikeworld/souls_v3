@@ -101,17 +101,16 @@ public class BossSkinSwap : MonoBehaviour
 
     void HideFrankBody()
     {
-        // The Frank_Mage body mesh is typically named "Frank_Mesh_Unity".
-        // Hide ONLY body meshes — keep ALL effect meshes (projectiles, rings,
-        // lasers, spells) so the boss's attack VFX still appear.
+        // The Frank_Mage body mesh is typically named "Frank_Mesh_Unity"
+        // Hide it but keep anything with "FX" in the name
         foreach (var renderer in GetComponentsInChildren<SkinnedMeshRenderer>())
         {
-            string n = renderer.gameObject.name;
-            if (IsFXRenderer(n)) continue;
-            if (n.Contains("Frank") || n.Contains("Mesh"))
+            if (renderer.gameObject.name.Contains("FX"))
+                continue;
+            if (renderer.gameObject.name.Contains("Frank") || renderer.gameObject.name.Contains("Mesh"))
             {
                 renderer.enabled = false;
-                Debug.Log($"[BossSkinSwap] Hidden: {n}");
+                Debug.Log($"[BossSkinSwap] Hidden: {renderer.gameObject.name}");
             }
         }
 
@@ -119,7 +118,11 @@ public class BossSkinSwap : MonoBehaviour
         foreach (var renderer in GetComponentsInChildren<MeshRenderer>())
         {
             string n = renderer.gameObject.name;
-            if (IsFXRenderer(n)) continue;
+            if (n.Contains("FX") || n.Contains("Projectile") || n.Contains("Ring") || n.Contains("Laser"))
+                continue;
+            // Skip if it looks like a weapon/staff
+            if (n.Contains("Weapon") || n.Contains("Staff"))
+                continue;
             // This is likely a body part — hide it
             if (n.Contains("Frank") || n.Contains("Mesh"))
             {
@@ -127,19 +130,6 @@ public class BossSkinSwap : MonoBehaviour
                 Debug.Log($"[BossSkinSwap] Hidden mesh: {n}");
             }
         }
-    }
-
-    /// <summary>True if the renderer is an attack/effect visual that must stay visible.</summary>
-    static bool IsFXRenderer(string name)
-    {
-        string n = name.ToLower();
-        return n.Contains("fx") || n.Contains("projectile") || n.Contains("ring")
-            || n.Contains("laser") || n.Contains("spell") || n.Contains("magic")
-            || n.Contains("cast") || n.Contains("vfx") || n.Contains("effect")
-            || n.Contains("glow") || n.Contains("trail") || n.Contains("aura")
-            || n.Contains("beam") || n.Contains("orb") || n.Contains("aoe")
-            // weapons/staves are not body parts either
-            || n.Contains("weapon") || n.Contains("staff");
     }
 
     void SpawnCustomModel()
