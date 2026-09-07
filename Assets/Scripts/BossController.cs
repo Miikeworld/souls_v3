@@ -16,7 +16,7 @@ public class BossController : Entity
     [Header("Boss Settings")]
     public string bossName = "Arcane Tyrant";
     public float detectionRange = 25f;
-    public float rotationSpeed = 8f;
+    public float rotationSpeed = 12f;
     public float walkSpeed = 3.5f;
     public float runSpeed = 5.5f;
 
@@ -39,7 +39,7 @@ public class BossController : Entity
     public float teleportCooldown = 8f;
 
     [Header("Combat — Evade")]
-    public float evadeChance = 0.25f;
+    public float evadeChance = 0.15f;
     public float evadeCooldown = 5f;
 
     [Header("Projectiles")]
@@ -78,6 +78,10 @@ public class BossController : Entity
     private float evadeCooldownTimer = 0f;
     private int   lastAttackIndex = -1;
     private int   consecutiveSameRange = 0;
+
+    private Vector3 startPosition;
+    private Quaternion startRotation;
+    [HideInInspector] public bool hasSavedSpawn = false;
 
     // Pending damage — set by coroutine, consumed by animation event
     private float pendingDamage = 0f;
@@ -162,6 +166,9 @@ public class BossController : Entity
     // ══════════════════════════════════════════════════════════════
     protected override void Start()
     {
+        // Bosses drop 2000 souls by default
+        soulsReward = 2000;
+
         base.Start();
 
         player      = GameObject.FindGameObjectWithTag("Player")?.transform;
@@ -202,6 +209,34 @@ public class BossController : Entity
             agent.stoppingDistance = 0f;
         }
         GroundOnNavMesh();
+
+        // Remember where the boss started so it can be reset when the player respawns
+        if (!hasSavedSpawn)
+        {
+            startPosition = transform.position;
+            startRotation = transform.rotation;
+            hasSavedSpawn = true;
+        }
+
+        // make arena boundary so boss fight stays contained
+        if (FindAnyObjectByType<ArenaBoundary>() == null)
+        {
+            GameObject arenaGO = new GameObject("ArenaBoundary");
+            arenaGO.transform.position = transform.position;
+            ArenaBoundary arena = arenaGO.AddComponent<ArenaBoundary>();
+            arena.boss = this;
+            arena.autoFindBoss = false;
+            arena.arenaSize = new Vector3(60f, 15f, 60f);
+            arena.wallThickness = 3f;
+            arena.autoCreateColliders = true;
+        }
+
+        // make boss hp bar if it got destroyed with the singleton GM
+        if (FindAnyObjectByType<BossHealthBarUI>() == null)
+        {
+            GameObject barGO = new GameObject("BossHealthBarUI");
+            barGO.AddComponent<BossHealthBarUI>();
+        }
 
         BuildAttackTable();
         currentState = BossState.Idle;
@@ -244,10 +279,10 @@ public class BossController : Entity
         float dist = Vector3.Distance(transform.position, player.position);
         FacePlayer();
 
-        // Player too close → teleport away or evade
+        // Player too close → teleport away or evade (less frequent so it feels fair)
         if (dist < closeRange)
         {
-            if (teleportCooldownTimer <= 0f && Random.value < 0.4f)
+            if (teleportCooldownTimer <= 0f && Random.value < 0.2f)
             { StartCoroutine(DoTeleport()); return; }
             if (evadeCooldownTimer <= 0f && Random.value < evadeChance)
             { StartCoroutine(DoEvade()); return; }
@@ -352,17 +387,35 @@ public class BossController : Entity
     IEnumerator DoRangedAttack(AttackEntry atk)
     {
         BeginAttack();
+
+        // Telegraph: stop and face the player for a split second before committing
+        float telegraph = 0.25f;
+        for (float t = 0f; t < telegraph; t += Time.deltaTime)
+        {
+            FacePlayer();
+            yield return null;
+        }
+
         useRootMotion = true;
         float dmg = projectileDamage * atk.dmgMult;
         SetPendingDamage(dmg, atk.range, false);
         animator.Play(atk.clips[0], 0, 0f);
         PlayAttackSound();
-        yield return new WaitForSeconds(atk.duration * 0.55f);
+
+        float wait = atk.duration * 0.55f;
+        for (float t = 0f; t < wait; t += Time.deltaTime)
+        {
+            // Keep facing the player so the cast doesn’t whiff because the target circled
+            if (t < wait * 0.7f) FacePlayer();
+            yield return null;
+        }
+
         // Fire a projectile if prefab exists, otherwise fall back to instant damage
         if (projectilePrefab != null && player != null)
             FireProjectile();
         else
             DealDamageInFront(dmg, atk.range);
+
         yield return new WaitForSeconds(atk.duration * 0.45f);
         EndAttack();
     }
@@ -371,6 +424,15 @@ public class BossController : Entity
     IEnumerator DoComboAttack(AttackEntry atk)
     {
         BeginAttack();
+
+        // Telegraph before the first swing of the combo
+        float telegraph = 0.3f;
+        for (float t = 0f; t < telegraph; t += Time.deltaTime)
+        {
+            FacePlayer();
+            yield return null;
+        }
+
         useRootMotion = true;
         float perClip = atk.duration / atk.clips.Length;
         foreach (string clip in atk.clips)
@@ -380,14 +442,23 @@ public class BossController : Entity
             SetPendingDamage(dmg, atk.range, atk.isAOE);
             animator.Play(clip, 0, 0f);
             PlayAttackSound();
-            // Deal damage at the midpoint of each hit
-            yield return new WaitForSeconds(perClip * 0.5f);
+
+            // Deal damage at the midpoint of each hit while keeping the boss facing the target
+            float hitWait = perClip * 0.5f;
+            for (float t = 0f; t < hitWait; t += Time.deltaTime)
+            {
+                if (t < hitWait * 0.7f) FacePlayer();
+                yield return null;
+            }
+
             // Fire projectile for visual feedback if prefab exists
             if (projectilePrefab != null && player != null && !atk.isAOE)
                 FireProjectile();
             if (atk.isAOE) DealDamageAround(dmg, atk.range);
             else DealDamageInFront(dmg, atk.range);
-            yield return new WaitForSeconds(perClip * 0.5f);
+
+            float recoverWait = perClip * 0.5f;
+            yield return new WaitForSeconds(recoverWait);
         }
         EndAttack();
     }
@@ -396,19 +467,37 @@ public class BossController : Entity
     IEnumerator DoSkillAttack(AttackEntry atk)
     {
         BeginAttack();
+
+        // Big skill attacks get a longer, more obvious telegraph
+        float telegraph = 0.45f;
+        for (float t = 0f; t < telegraph; t += Time.deltaTime)
+        {
+            FacePlayer();
+            yield return null;
+        }
+
         useRootMotion = true;
         float dmg = skillDamage * atk.dmgMult;
         SetPendingDamage(dmg, atk.range, atk.isAOE);
         animator.Play(atk.clips[0], 0, 0f);
         PlayAttackSound();
-        yield return new WaitForSeconds(atk.duration * 0.5f);
+
+        float wait = atk.duration * 0.5f;
+        for (float t = 0f; t < wait; t += Time.deltaTime)
+        {
+            if (t < wait * 0.8f) FacePlayer();
+            yield return null;
+        }
+
         // Fire projectile for visual feedback if prefab exists
         if (projectilePrefab != null && player != null && !atk.isAOE)
             FireProjectile();
         if (atk.isAOE) DealDamageAround(dmg, atk.range);
         else DealDamageInFront(dmg, atk.range);
+
         // Big attack — shake the screen for impact
-        ShakePlayerCamera(0.2f, 0.25f);
+        ShakePlayerCamera(0.25f, 0.35f);
+
         yield return new WaitForSeconds(atk.duration * 0.5f);
         EndAttack();
     }
@@ -493,11 +582,21 @@ public class BossController : Entity
     {
         isAttacking = false;
         useRootMotion = false;
+        pendingDamage = 0f;
+        pendingIsAOE = false;
         attackCooldownTimer = cooldownOverride >= 0f
             ? cooldownOverride
             : Random.Range(attackCooldownMin, attackCooldownMax);
         SetAgentEnabled(true);
         currentState = BossState.Chasing;
+    }
+
+    void CancelCurrentAttack()
+    {
+        StopAllCoroutines();
+        if (animator != null && !isDead && hitAnims != null && hitAnims.Length > 0)
+            animator.CrossFade(hitAnims[Random.Range(0, hitAnims.Length)], 0.1f);
+        EndAttack(1.2f);
     }
 
     void FacePlayer()
@@ -517,7 +616,9 @@ public class BossController : Entity
         if (agent == null || !agent.isOnNavMesh) return;
         agent.isStopped = !enabled;
         agent.updatePosition = enabled;
-        agent.updateRotation = enabled;
+        // We handle rotation ourselves via FacePlayer(), so the NavMeshAgent
+        // spinning on its own doesn’t make the boss jitter/wiggle.
+        agent.updateRotation = false;
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -657,9 +758,21 @@ public class BossController : Entity
     protected override void OnDamageTaken(float damage, Entity attacker)
     {
         PlaySound(hurtSounds);
-        // Play random hit reaction if not mid-attack
-        if (animator != null && !isAttacking && hitAnims != null && hitAnims.Length > 0)
+
+        if (animator == null || hitAnims == null || hitAnims.Length == 0) return;
+
+        if (!isAttacking)
+        {
+            // Free hit reaction
             animator.CrossFade(hitAnims[Random.Range(0, hitAnims.Length)], 0.1f);
+        }
+        else if (pendingDamage <= 0f)
+        {
+            // Attack is still winding up / recovering — player can interrupt the boss
+            CancelCurrentAttack();
+        }
+        // If the boss is in the active hit frames (pendingDamage > 0), it has hyper-armour
+        // and ignores the flinch, so the player must time around it.
     }
 
     protected override void Die()
@@ -672,7 +785,8 @@ public class BossController : Entity
         // Disable agent completely so it doesn't fight with position
         if (agent != null)
         {
-            agent.isStopped = true;
+            if (agent.enabled && agent.isOnNavMesh)
+                agent.isStopped = true;
             agent.updatePosition = false;
             agent.updateRotation = false;
             agent.enabled = false;
@@ -695,6 +809,41 @@ public class BossController : Entity
     {
         yield return new WaitForSeconds(t);
         gameObject.SetActive(false);
+    }
+
+    public void ResetToSpawn()
+    {
+        StopAllCoroutines();
+
+        isDead = false;
+        currentHealth = maxHealth;
+        currentStamina = maxStamina;
+
+        gameObject.SetActive(true);
+        transform.position = startPosition;
+        transform.rotation = startRotation;
+
+        if (agent != null)
+        {
+            agent.enabled = true;
+            if (agent.isOnNavMesh)
+                agent.Warp(startPosition);
+            else
+                agent.transform.position = startPosition;
+        }
+
+        if (animator != null)
+            animator.CrossFade("Idle", 0.1f, 0);
+
+        currentState = BossState.Idle;
+        isAttacking = false;
+        useRootMotion = false;
+        attackCooldownTimer = 0f;
+        teleportCooldownTimer = 0f;
+        evadeCooldownTimer = 0f;
+
+        if (weaponHitbox != null)
+            weaponHitbox.Deactivate();
     }
 
     // ══════════════════════════════════════════════════════════════

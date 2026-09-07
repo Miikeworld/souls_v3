@@ -613,7 +613,7 @@ public class CharacterCreationController : MonoBehaviour
         if (GameManager.Instance != null)
             GameManager.Instance.OnCharacterCreated();
         
-        SceneManager.LoadScene(gameSceneName);
+        LoadingScreen.LoadScene(gameSceneName, "Entering the realm...");
     }
 }
 

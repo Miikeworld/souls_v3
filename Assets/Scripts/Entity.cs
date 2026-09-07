@@ -24,10 +24,13 @@ public abstract class Entity : MonoBehaviour
     public float staminaRegenRate = 15f; // Stamina per second
     public float staminaRegenDelay = 1f; // Delay after use
     
+    [Header("Souls Reward (given to the player that kills this entity)")]
+    public int soulsReward = 50;
+
     [Header("Debug")]
     public bool showDebug = false;
     
-    // Events for UI updates
+    // Events
     public event Action OnHealthChanged;
     public event Action OnManaChanged;
     public event Action OnStaminaChanged;
@@ -40,11 +43,16 @@ public abstract class Entity : MonoBehaviour
     
     protected virtual void Start()
     {
+        // Guard against invalid max values
+        if (maxHealth <= 0) maxHealth = 100f;
+        if (maxMana <= 0) maxMana = 100f;
+        if (maxStamina <= 0) maxStamina = 100f;
+
         // Initialize to max
         currentHealth = maxHealth;
         currentMana = maxMana;
         currentStamina = maxStamina;
-        currentPotions = 5; // Start with 5 potions
+        currentPotions = 5;
         
         InvokeResourceEvents();
     }
@@ -58,15 +66,15 @@ public abstract class Entity : MonoBehaviour
     
     protected virtual void RegenerateResources()
     {
-        // Health regeneration (removed - only heal at bonfires)
-        
-        // Mana regeneration (constant)
+        // No passive health regen
+
+        // Mana regen
         if (currentMana < maxMana)
         {
             ModifyMana(manaRegenRate * Time.deltaTime);
         }
-        
-        // Stamina regeneration (with delay)
+
+        // Stamina regen after delay
         if (staminaRegenTimer > 0f)
         {
             staminaRegenTimer -= Time.deltaTime;
@@ -94,6 +102,10 @@ public abstract class Entity : MonoBehaviour
         
         if (currentHealth <= 0f)
         {
+            // Award souls to the player who landed the killing blow
+            if (attacker is PlayerController playerAttacker && !(this is PlayerController))
+                playerAttacker.AddSouls(soulsReward);
+
             Die();
         }
         else
@@ -243,10 +255,10 @@ public abstract class Entity : MonoBehaviour
         OnStaminaChanged?.Invoke();
     }
     
-    // Getters for percentages (useful for UI)
-    public float GetHealthPercent() => currentHealth / maxHealth;
-    public float GetManaPercent() => currentMana / maxMana;
-    public float GetStaminaPercent() => currentStamina / maxStamina;
+    // Percentage getters
+    public float GetHealthPercent() => maxHealth > 0 ? currentHealth / maxHealth : 0f;
+    public float GetManaPercent() => maxMana > 0 ? currentMana / maxMana : 0f;
+    public float GetStaminaPercent() => maxStamina > 0 ? currentStamina / maxStamina : 0f;
     
     // Abstract and virtual methods
     protected virtual void OnDamageTaken(float damage, Entity attacker) { }

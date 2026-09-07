@@ -1,20 +1,12 @@
 using UnityEngine;
+using UnityEngine.InputSystem;
 using Unity.Cinemachine;
 using Unity.Cinemachine.TargetTracking;
 using System.Collections;
+using System.Linq;
 
 /// <summary>
-/// Souls-like camera using Cinemachine 3.x (tested with 3.1.6).
-/// Creates two virtual cameras at runtime:
-///   1. FreeCam  — third-person orbit controlled by mouse
-///   2. LockOnCam — sits behind player, looks at enemy
-///
-/// SETUP:
-///   1. Create an empty GameObject "CameraManager" and add this script
-///   2. Assign the player Transform
-///   3. DISABLE or REMOVE the old CameraFollow script from the Main Camera
-///   4. Wire up LockOnSystem.cinemachineCam to this object
-///   5. This script auto-adds CinemachineBrain to the Main Camera
+/// Cinemachine 3.x free + lock-on camera. Creates FreeCam and LockOnCam at runtime.
 /// </summary>
 public class CinemachineLockOnCamera : MonoBehaviour
 {
@@ -61,25 +53,21 @@ public class CinemachineLockOnCamera : MonoBehaviour
         if (shakeTimer > 0f)
             shakeTimer -= Time.deltaTime;
 
-        // Failsafe: ensure camera is always controllable
+        // Re-enable brain if both camera systems are disabled
         if (cachedBrain != null && cachedCameraFollow != null)
         {
             if (!cachedBrain.enabled && !cachedCameraFollow.enabled)
             {
-                // Both disabled - re-enable CinemachineBrain as fallback
                 cachedBrain.enabled = true;
                 Debug.LogWarning("[CinemachineLockOnCamera] Both camera systems were disabled, re-enabled CinemachineBrain");
             }
         }
 
-        // Ensure cursor stays locked (unlocked cursor prevents mouse camera control)
-        if (Cursor.lockState != CursorLockMode.Locked)
+        // Re-lock cursor when hidden (other systems may unlock it)
+        if (!Cursor.visible && Cursor.lockState != CursorLockMode.Locked)
             Cursor.lockState = CursorLockMode.Locked;
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    //  SETUP
-    // ═══════════════════════════════════════════════════════════════
 
     void EnsureBrain()
     {
@@ -101,7 +89,7 @@ public class CinemachineLockOnCamera : MonoBehaviour
         cachedBrain.DefaultBlend = new CinemachineBlendDefinition(
             CinemachineBlendDefinition.Styles.EaseInOut, 0.4f);
 
-        // Start with CameraFollow disabled, Cinemachine free cam active
+        // Disable CameraFollow, enable Cinemachine free cam
         if (cachedCameraFollow != null) cachedCameraFollow.enabled = false;
         cachedBrain.enabled = true;
     }
@@ -115,20 +103,67 @@ public class CinemachineLockOnCamera : MonoBehaviour
         freeCam.Follow = player;
         freeCam.LookAt = player;
 
-        // Orbital follow for mouse-controlled orbit
+        // Mouse-controlled orbit
         var orbital = go.AddComponent<CinemachineOrbitalFollow>();
         orbital.TargetOffset = new Vector3(0f, freeHeight, 0f);
         orbital.OrbitStyle = CinemachineOrbitalFollow.OrbitStyles.Sphere;
         orbital.Radius = freeDistance;
 
-        // Input axis controller for mouse orbit
-        go.AddComponent<CinemachineInputAxisController>();
+        // Bind look and scroll inputs
+        var axisController = go.AddComponent<CinemachineInputAxisController>();
 
-        // Rotation composer to look at player
+        // Bind the Player/Look action
+        InputActionReference lookRef = GetLookActionReference();
+        if (lookRef != null)
+        {
+            axisController.SynchronizeControllers();
+            foreach (var c in axisController.Controllers)
+            {
+                if (c == null || c.Input == null) continue;
+
+                c.Input.CancelDeltaTime = true;
+
+                if (c.Name == "Look Orbit X" || c.Name == "Look Orbit Y")
+                {
+                    c.Input.InputAction = lookRef;
+                    c.Input.Gain = c.Name == "Look Orbit Y" ? -0.08f : 0.08f;
+                }
+                else if (c.Name == "Orbit Scale")
+                {
+                    c.Input.LegacyInput = "Mouse ScrollWheel";
+                    c.Input.LegacyGain = 1f;
+                }
+            }
+        }
+
+        // Look at player
         var composer = go.AddComponent<CinemachineRotationComposer>();
         composer.TargetOffset = new Vector3(0f, 1.2f, 0f);
 
         Debug.Log("[CinemachineLockOnCamera] Created FreeCam.");
+    }
+
+    InputActionReference GetLookActionReference()
+    {
+        InputActionAsset asset = null;
+
+        // Try project-wide actions first
+        if (InputSystem.actions != null)
+            asset = InputSystem.actions;
+
+        // Then search preloaded asset
+        if (asset == null)
+        {
+            var found = Resources.FindObjectsOfTypeAll<InputActionAsset>();
+            asset = found.FirstOrDefault(a => a.name == "InputSystem_Actions");
+        }
+
+        if (asset == null) return null;
+
+        var action = asset.FindAction("Player/Look", true);
+        if (action == null) return null;
+
+        return InputActionReference.Create(action);
     }
 
     void CreateLockOnCam()
@@ -140,7 +175,7 @@ public class CinemachineLockOnCamera : MonoBehaviour
         lockOnCam.Follow = player;
         lockOnCam.LookAt = player;
 
-        // Positional follow — stable orbit, does NOT chase player rotation
+        // World-space follow; does not inherit player rotation
         var follow = go.AddComponent<CinemachineFollow>();
         follow.FollowOffset = new Vector3(0f, lockOnHeight, -lockOnDistance);
         follow.TrackerSettings = new TrackerSettings
@@ -151,7 +186,7 @@ public class CinemachineLockOnCamera : MonoBehaviour
             QuaternionDamping = 0f
         };
 
-        // Rotation composer to aim at the lock-on target
+        // Aim at lock-on target
         var composer = go.AddComponent<CinemachineRotationComposer>();
         composer.TargetOffset = new Vector3(0f, 1.0f, 0f);
         composer.Damping = new Vector2(2f, 2f);
@@ -159,19 +194,13 @@ public class CinemachineLockOnCamera : MonoBehaviour
         Debug.Log("[CinemachineLockOnCamera] Created LockOnCam.");
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    //  PRIORITY HELPER (CM3 uses PrioritySettings struct)
-    // ═══════════════════════════════════════════════════════════════
-
+    // Set CM3 priority via PrioritySettings
     void SetPriority(CinemachineCamera cam, int value)
     {
         cam.Priority = new PrioritySettings { Enabled = true, Value = value };
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    //  PUBLIC API — called by LockOnSystem
-    // ═══════════════════════════════════════════════════════════════
-
+    // Lock-on API
     public void SetLockOnTarget(Transform target)
     {
         if (target == null)
@@ -183,7 +212,7 @@ public class CinemachineLockOnCamera : MonoBehaviour
         lockOnTarget = target;
         isLockedOn = true;
 
-        // Disable Cinemachine, enable CameraFollow for lock-on
+        // Use CameraFollow for lock-on
         if (cachedBrain != null) cachedBrain.enabled = false;
         if (cachedCameraFollow != null)
         {
@@ -197,7 +226,7 @@ public class CinemachineLockOnCamera : MonoBehaviour
         isLockedOn = false;
         lockOnTarget = null;
 
-        // Disable CameraFollow, re-enable Cinemachine for free cam
+        // Use Cinemachine for free cam
         if (cachedCameraFollow != null)
         {
             cachedCameraFollow.SetLockOnTarget(null);
@@ -206,16 +235,13 @@ public class CinemachineLockOnCamera : MonoBehaviour
         if (cachedBrain != null) cachedBrain.enabled = true;
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    //  CAMERA SHAKE
-    // ═══════════════════════════════════════════════════════════════
 
     public void Shake(float magnitude = -1f, float duration = -1f)
     {
         if (magnitude < 0f) magnitude = defaultShakeMagnitude;
         if (duration < 0f) duration = defaultShakeDuration;
 
-        // Route shake to CameraFollow when it's active (lock-on mode)
+        // Delegate shake to CameraFollow when active
         if (cachedCameraFollow != null && cachedCameraFollow.enabled)
         {
             cachedCameraFollow.Shake(magnitude, duration);

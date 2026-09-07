@@ -2,11 +2,7 @@ using UnityEngine;
 using UnityEngine.UI;
 
 /// <summary>
-/// Souls-style boss health bar that appears at the bottom center of the screen.
-/// Auto-creates its own UI at runtime — just add this component to ANY GameObject
-/// and assign the boss reference (or it auto-finds the first BossController).
-///
-/// SETUP: Add this to a GameObject in your scene. No manual UI setup needed.
+/// Auto-created boss health bar that binds to the nearest live BossController.
 /// </summary>
 public class BossHealthBarUI : MonoBehaviour
 {
@@ -19,7 +15,7 @@ public class BossHealthBarUI : MonoBehaviour
     public float barHeight = 16f;
     public float yOffset = 60f;
     public float fillSpeed = 4f;
-    public float showDistance = 30f;
+    public float showDistance = 80f;
 
     [Header("Colors")]
     public Color barColor = new Color(0.85f, 0.15f, 0.1f, 1f);
@@ -39,10 +35,12 @@ public class BossHealthBarUI : MonoBehaviour
     private float trailFill = 1f;
     private bool isVisible = false;
     private Transform player;
+    private bool loggedNoBoss = false;
 
     void Start()
     {
-        if (boss == null)
+        // Find the live boss instance in the scene
+        if (boss == null || !boss.gameObject.scene.IsValid())
             boss = FindAnyObjectByType<BossController>();
 
         PlayerController pc = FindAnyObjectByType<PlayerController>();
@@ -63,18 +61,43 @@ public class BossHealthBarUI : MonoBehaviour
 
     void Update()
     {
-        if (boss == null) return;
+        // Re-find player if spawned later
+        if (player == null)
+        {
+            PlayerController pc = FindAnyObjectByType<PlayerController>();
+            if (pc != null) player = pc.transform;
+        }
 
-        // Show/hide based on boss state and distance
+        // Refind live boss if assigned one is invalid/dead
+        if (boss == null || boss.isDead || !boss.gameObject.scene.IsValid())
+            boss = FindBestBoss();
+
+        if (boss == null)
+        {
+            if (isVisible) SetVisible(false);
+            if (!loggedNoBoss)
+            {
+                Debug.Log("[BossHealthBarUI] No live BossController found in scene.");
+                loggedNoBoss = true;
+            }
+            return;
+        }
+        else
+        {
+            loggedNoBoss = false;
+        }
+
+        // Keep fill current even when hidden
+        targetFill = boss.GetHealthPercent();
+
+        // Show when player is in range and boss is alive; hide briefly on death
         bool shouldShow = !boss.isDead
-            && boss.currentState != BossController.BossState.Idle
-            && player != null
-            && Vector3.Distance(player.position, boss.transform.position) <= showDistance;
+            && (player == null
+            || Vector3.Distance(player.position, boss.transform.position) <= Mathf.Max(showDistance, 80f));
 
         if (shouldShow && !isVisible) SetVisible(true);
         if (!shouldShow && isVisible)
         {
-            // Keep visible briefly after boss dies for dramatic effect
             if (boss.isDead)
                 Invoke(nameof(HideBar), 2f);
             else
@@ -87,7 +110,7 @@ public class BossHealthBarUI : MonoBehaviour
         if (fillImage != null)
             fillImage.fillAmount = Mathf.Lerp(fillImage.fillAmount, targetFill, fillSpeed * Time.deltaTime);
 
-        // Trail (delayed damage indicator) — follows more slowly
+        // Delayed damage trail
         if (trailImage != null)
         {
             if (trailFill > targetFill)
@@ -96,6 +119,25 @@ public class BossHealthBarUI : MonoBehaviour
                 trailFill = targetFill;
             trailImage.fillAmount = trailFill;
         }
+    }
+
+    BossController FindBestBoss()
+    {
+        BossController[] all = FindObjectsByType<BossController>(FindObjectsSortMode.None);
+        BossController best = null;
+        float bestDist = float.MaxValue;
+        foreach (BossController b in all)
+        {
+            if (b.isDead) continue;
+            if (player == null) { best = b; break; }
+            float d = Vector3.Distance(player.position, b.transform.position);
+            if (d < bestDist)
+            {
+                bestDist = d;
+                best = b;
+            }
+        }
+        return best;
     }
 
     void OnBossHealthChanged()
@@ -114,16 +156,14 @@ public class BossHealthBarUI : MonoBehaviour
         if (barRoot != null) barRoot.SetActive(visible);
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    //  AUTO-CREATE UI
-    // ═══════════════════════════════════════════════════════════════
     void CreateUI()
     {
-        // Find or create overlay canvas
+        // Create overlay canvas if needed
         canvas = FindExistingOverlayCanvas();
         if (canvas == null)
         {
             GameObject canvasGO = new GameObject("BossBarCanvas");
+            canvasGO.AddComponent<RectTransform>();
             canvas = canvasGO.AddComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
             canvas.sortingOrder = 100;
@@ -132,7 +172,7 @@ public class BossHealthBarUI : MonoBehaviour
             canvasGO.AddComponent<GraphicRaycaster>();
         }
 
-        // Root container — anchored to bottom center
+        // Bar root
         barRoot = new GameObject("BossHealthBar");
         barRoot.transform.SetParent(canvas.transform, false);
         RectTransform rootRT = barRoot.AddComponent<RectTransform>();
@@ -142,9 +182,10 @@ public class BossHealthBarUI : MonoBehaviour
         rootRT.anchoredPosition = new Vector2(0f, yOffset);
         rootRT.sizeDelta = new Vector2(barWidth, barHeight + 30f);
 
-        // Boss name text
+        // Boss name
         GameObject nameGO = new GameObject("BossName");
         nameGO.transform.SetParent(barRoot.transform, false);
+        nameGO.AddComponent<RectTransform>();
         nameText = nameGO.AddComponent<Text>();
         nameText.text = boss != null ? boss.bossName : "???";
         nameText.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
@@ -160,10 +201,10 @@ public class BossHealthBarUI : MonoBehaviour
         nameRT.anchoredPosition = new Vector2(0f, 2f);
         nameRT.sizeDelta = new Vector2(0f, 24f);
 
-        // Background bar
+        // Background
         GameObject bgGO = CreateBarImage("BG", barRoot.transform, bgColor);
         bgImage = bgGO.GetComponent<Image>();
-        bgImage.type = Image.Type.Sliced;
+        bgImage.type = Image.Type.Simple;
         RectTransform bgRT = bgGO.GetComponent<RectTransform>();
         bgRT.anchorMin = new Vector2(0f, 0f);
         bgRT.anchorMax = new Vector2(1f, 0f);
@@ -171,7 +212,7 @@ public class BossHealthBarUI : MonoBehaviour
         bgRT.anchoredPosition = Vector2.zero;
         bgRT.sizeDelta = new Vector2(0f, barHeight);
 
-        // Damage trail bar (orange, fades behind the red)
+        // Damage trail
         GameObject trailGO = CreateBarImage("Trail", bgGO.transform, damageTrailColor);
         trailImage = trailGO.GetComponent<Image>();
         trailImage.type = Image.Type.Filled;
@@ -183,7 +224,7 @@ public class BossHealthBarUI : MonoBehaviour
         trailRT.offsetMin = Vector2.one * 2f;
         trailRT.offsetMax = -Vector2.one * 2f;
 
-        // Health fill bar (red)
+        // Health fill
         GameObject fillGO = CreateBarImage("Fill", bgGO.transform, barColor);
         fillImage = fillGO.GetComponent<Image>();
         fillImage.type = Image.Type.Filled;
@@ -203,16 +244,30 @@ public class BossHealthBarUI : MonoBehaviour
     {
         GameObject go = new GameObject(name);
         go.transform.SetParent(parent, false);
+        go.AddComponent<RectTransform>();
         Image img = go.AddComponent<Image>();
         img.color = color;
+        img.sprite = WhiteSprite();
         return go;
+    }
+
+    Sprite WhiteSprite()
+    {
+        Texture2D tex = new Texture2D(2, 2);
+        Color[] pixels = new Color[4] { Color.white, Color.white, Color.white, Color.white };
+        tex.SetPixels(pixels);
+        tex.Apply();
+        return Sprite.Create(tex, new Rect(0, 0, 2, 2), new Vector2(0.5f, 0.5f));
     }
 
     Canvas FindExistingOverlayCanvas()
     {
+        // Only reuse a canvas created by this bar
         foreach (Canvas c in FindObjectsByType<Canvas>(FindObjectsSortMode.None))
         {
-            if (c.renderMode == RenderMode.ScreenSpaceOverlay && c.gameObject.activeInHierarchy)
+            if (c.renderMode == RenderMode.ScreenSpaceOverlay &&
+                c.gameObject.activeInHierarchy &&
+                c.name == "BossBarCanvas")
                 return c;
         }
         return null;

@@ -38,14 +38,15 @@ System.Collections.IEnumerator DestroyTextForever()
         yield return new WaitForSeconds(0.1f);
         
         // Destroy ALL canvases and text in entire scene
-        Canvas[] canvases = FindObjectsOfType<Canvas>();
+        Canvas[] canvases = FindObjectsByType<Canvas>(FindObjectsSortMode.None);
         foreach (Canvas canvas in canvases)
         {
             // Check if it has that annoying text
             TMPro.TMP_Text[] texts = canvas.GetComponentsInChildren<TMPro.TMP_Text>(true);
             foreach (TMPro.TMP_Text text in texts)
             {
-                if (text.text.Contains("Mouse") || text.text.Contains("WASD") || text.text.Contains("Rotate"))
+                if (text != null && !string.IsNullOrEmpty(text.text) &&
+                    (text.text.Contains("Mouse") || text.text.Contains("WASD") || text.text.Contains("Rotate")))
                 {
                     Debug.Log(canvas.gameObject.name);
                     Destroy(canvas.gameObject);
@@ -57,7 +58,8 @@ System.Collections.IEnumerator DestroyTextForever()
             UnityEngine.UI.Text[] legacyTexts = canvas.GetComponentsInChildren<UnityEngine.UI.Text>(true);
             foreach (UnityEngine.UI.Text text in legacyTexts)
             {
-                if (text.text.Contains("Mouse") || text.text.Contains("WASD") || text.text.Contains("Rotate"))
+                if (text != null && !string.IsNullOrEmpty(text.text) &&
+                    (text.text.Contains("Mouse") || text.text.Contains("WASD") || text.text.Contains("Rotate")))
                 {
                     Debug.Log(canvas.gameObject.name);
                     Destroy(canvas.gameObject);

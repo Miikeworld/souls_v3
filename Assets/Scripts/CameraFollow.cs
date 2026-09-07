@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 public class CameraFollow : MonoBehaviour
 {
@@ -23,7 +24,7 @@ public class CameraFollow : MonoBehaviour
     [Header("Collision")]
     public float collisionRadius = 0.2f;
     public LayerMask collisionLayers = ~0;
-    public LayerMask lockOnCollisionLayers; // Set this to Environment layers only
+    public LayerMask lockOnCollisionLayers; // env layers only when locked on
 
     [HideInInspector] public float yaw;
     [HideInInspector] public float pitch;
@@ -36,10 +37,57 @@ public class CameraFollow : MonoBehaviour
     private float shakeMagnitude = 0f;
     private float shakeDecay = 1f;
 
+    // new input action for mouse look
+    private InputAction lookAction;
+
+    void OnEnable()
+    {
+        // try to use the built in InputSystem_Actions "Player/Look" action
+        // that asset is already loaded by the UI modules, so it works in builds
+        InputActionAsset[] assets = Resources.FindObjectsOfTypeAll<InputActionAsset>();
+        foreach (var a in assets)
+        {
+            if (a.name == "InputSystem_Actions")
+            {
+                lookAction = a.FindAction("Player/Look", true);
+                if (lookAction != null)
+                    break;
+            }
+        }
+
+        // fall back to a direct mouse action
+        if (lookAction == null)
+        {
+            lookAction = new InputAction("CameraLook", InputActionType.Value, binding: "<Mouse>/delta");
+        }
+
+        lookAction.Enable();
+    }
+
+    void OnDisable()
+    {
+        lookAction?.Disable();
+    }
+
     void Start()
     {
-        Cursor.lockState = CursorLockMode.Locked;
-        Cursor.visible = false;
+        // auto find player if target not set
+        if (target == null)
+        {
+            PlayerController pc = FindAnyObjectByType<PlayerController>();
+            if (pc != null)
+                target = pc.transform;
+            else
+            {
+                GameObject player = GameObject.FindGameObjectWithTag("Player");
+                if (player != null)
+                    target = player.transform;
+            }
+        }
+
+        // tag this cam as main so PlayerController can find it
+        if (Camera.main == null && GetComponent<Camera>() != null)
+            tag = "MainCamera";
 
         if (target != null)
         {
@@ -48,6 +96,13 @@ public class CameraFollow : MonoBehaviour
             pitch = angles.x;
 
             if (pitch > 180f) pitch -= 360f;
+
+            // lock + hide cursor for gameplay
+            if (Cursor.visible)
+            {
+                Cursor.lockState = CursorLockMode.Locked;
+                Cursor.visible = false;
+            }
         }
     }
 
@@ -55,6 +110,19 @@ public class CameraFollow : MonoBehaviour
 
     void LateUpdate()
     {
+        if (target == null)
+        {
+            PlayerController pc = FindAnyObjectByType<PlayerController>();
+            if (pc != null) target = pc.transform;
+        }
+
+        // relock cursor when it gets unlocked
+        if (target != null && Cursor.lockState != CursorLockMode.Locked)
+        {
+            Cursor.lockState = CursorLockMode.Locked;
+            Cursor.visible = false;
+        }
+
         if (target == null) return;
 
         if (isLockedOn && lockOnTarget != null)
@@ -72,10 +140,26 @@ public class CameraFollow : MonoBehaviour
         ApplyShake();
     }
 
+    // empty OnGUI fixes a unity build bug where old mouse input gets stripped when "Both" is active
+    void OnGUI() { }
+
     void UpdateFreeCamera()
     {
-        float mouseX = Input.GetAxis("Mouse X") * mouseSensitivity;
-        float mouseY = Input.GetAxis("Mouse Y") * mouseSensitivity;
+        // use an Input Action for mouse look, fallback to old axis
+        float mouseX = 0f, mouseY = 0f;
+        if (lookAction != null && lookAction.enabled)
+        {
+            Vector2 md = lookAction.ReadValue<Vector2>();
+            mouseX = md.x * mouseSensitivity * 0.1f;
+            mouseY = md.y * mouseSensitivity * 0.1f;
+        }
+
+        // if new input gave nothing, use old Input Manager
+        if (Mathf.Abs(mouseX) < 0.001f && Mathf.Abs(mouseY) < 0.001f)
+        {
+            mouseX = Input.GetAxis("Mouse X") * mouseSensitivity;
+            mouseY = Input.GetAxis("Mouse Y") * mouseSensitivity;
+        }
 
         yaw += mouseX;
         pitch -= mouseY;

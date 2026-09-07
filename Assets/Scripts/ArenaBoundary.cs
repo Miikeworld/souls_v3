@@ -1,19 +1,21 @@
 using UnityEngine;
+using UnityEngine.AI;
 
-/// <summary>
-/// Creates an invisible arena boundary that prevents the player and boss from leaving
-/// the fight area until the boss is defeated. The boundary consists of colliders that
-/// act as walls. When the boss dies, the boundary is automatically disabled.
-/// </summary>
+/// invisible walls for the boss arena, disabled when boss dies
 public class ArenaBoundary : MonoBehaviour
 {
     [Header("Boss Reference")]
-    [Tooltip("The boss entity. When this boss dies, the boundary will be disabled.")]
+    [Tooltip("The boss entity. When this boss dies, the boundary will be disabled. If left empty, the boundary searches for a BossController.")]
     public Entity boss;
+    [Tooltip("If true and the boss field is empty, find the first BossController in the scene.")]
+    public bool autoFindBoss = true;
 
     [Header("Boundary Settings")]
     [Tooltip("Size of the arena boundary (x = width, z = depth, y = wall height).")]
     public Vector3 arenaSize = new Vector3(30f, 10f, 30f);
+
+    [Tooltip("How thick the invisible walls are. Increase if the player/boss can clip through.")]
+    public float wallThickness = 3f;
     
     [Tooltip("If true, automatically creates box colliders to form the boundary walls.")]
     public bool autoCreateColliders = true;
@@ -27,6 +29,12 @@ public class ArenaBoundary : MonoBehaviour
 
     void Start()
     {
+        if (boss == null && autoFindBoss)
+        {
+            BossController b = FindAnyObjectByType<BossController>();
+            if (b != null) boss = b;
+        }
+
         if (boss != null)
         {
             wasAlive = boss.currentHealth > 0f;
@@ -83,25 +91,33 @@ public class ArenaBoundary : MonoBehaviour
             {
                 case 0: // North (positive Z)
                     pos = new Vector3(0f, arenaSize.y / 2f, arenaSize.z / 2f);
-                    size = new Vector3(arenaSize.x, arenaSize.y, 1f);
+                    size = new Vector3(arenaSize.x, arenaSize.y, wallThickness);
                     break;
                 case 1: // South (negative Z)
                     pos = new Vector3(0f, arenaSize.y / 2f, -arenaSize.z / 2f);
-                    size = new Vector3(arenaSize.x, arenaSize.y, 1f);
+                    size = new Vector3(arenaSize.x, arenaSize.y, wallThickness);
                     break;
                 case 2: // East (positive X)
                     pos = new Vector3(arenaSize.x / 2f, arenaSize.y / 2f, 0f);
-                    size = new Vector3(1f, arenaSize.y, arenaSize.z);
+                    size = new Vector3(wallThickness, arenaSize.y, arenaSize.z);
                     break;
                 case 3: // West (negative X)
                     pos = new Vector3(-arenaSize.x / 2f, arenaSize.y / 2f, 0f);
-                    size = new Vector3(1f, arenaSize.y, arenaSize.z);
+                    size = new Vector3(wallThickness, arenaSize.y, arenaSize.z);
                     break;
             }
 
             wall.transform.localPosition = pos;
             collider.size = size;
             createdColliders[i] = collider;
+
+            // Also add a NavMeshObstacle so the boss's NavMeshAgent can’t path through the wall.
+            NavMeshObstacle obstacle = wall.AddComponent<NavMeshObstacle>();
+            obstacle.shape = NavMeshObstacleShape.Box;
+            obstacle.size = size;
+            obstacle.center = Vector3.zero;
+            obstacle.carving = true;
+            obstacle.carveOnlyStationary = true;
         }
 
         Debug.Log($"[ArenaBoundary] Created {createdColliders.Length} boundary walls");
